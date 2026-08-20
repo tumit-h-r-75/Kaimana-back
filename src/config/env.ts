@@ -1,19 +1,33 @@
-// Environment variable loading, validation, and app-wide configuration constants.
+import "dotenv/config";
+import { z } from "zod";
 
-import dotenv from "dotenv"
-import path from "path"
+const optionalString = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
 
-dotenv.config({ path: path.join(process.cwd(), ".env") });
+const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  PORT: z.coerce.number().int().positive().default(5000),
+  MONGODB_URI: optionalString,
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
+  JWT_SECRET: optionalString,
+  FRONTEND_URL: optionalString,
+  PISTON_URL: optionalString,
+  ANTHROPIC_API_KEY: optionalString,
+});
+
+export const env = envSchema.parse(process.env);
 
 export const config = {
-    nodeEnv: process.env.NODE_ENV,
-    port: process.env.PORT,
-    mongodbUri: process.env.MONGODB_URI,
-    googleClientId: process.env.GOOGLE_CLIENT_ID,
-    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    jwtSecret: process.env.JWT_SECRET,
-    frontendUrl: process.env.FRONTEND_URL,
-    pistonUrl: process.env.PISTON_URL,
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    socketPort: process.env.SOCKET_PORT,
-}
+  nodeEnv: env.NODE_ENV,
+  port: env.PORT,
+  mongodbUri: env.MONGODB_URI,
+  googleClientId: env.GOOGLE_CLIENT_ID,
+  googleClientSecret: env.GOOGLE_CLIENT_SECRET,
+  jwtSecret: env.JWT_SECRET,
+  frontendUrl: env.FRONTEND_URL,
+  pistonUrl: env.PISTON_URL,
+  anthropicApiKey: env.ANTHROPIC_API_KEY,
+};
