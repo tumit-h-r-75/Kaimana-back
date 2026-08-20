@@ -1,6 +1,6 @@
 import { model, models, Schema } from "mongoose";
 
-export interface User {
+export interface IUser {
   googleId: string;
   name: string;
   email: string;
@@ -11,7 +11,7 @@ export interface User {
   updatedAt: Date;
 }
 
-const userSchema = new Schema<User>(
+const userSchema = new Schema<IUser>(
   {
     googleId: {
       type: String,
@@ -19,11 +19,13 @@ const userSchema = new Schema<User>(
       unique: true,
       index: true,
     },
+
     name: {
       type: String,
       required: true,
       trim: true,
     },
+
     email: {
       type: String,
       required: true,
@@ -31,19 +33,28 @@ const userSchema = new Schema<User>(
       lowercase: true,
       trim: true,
     },
-    profilePicUrl: String,
+
+    profilePicUrl: {
+      type: String,
+      trim: true,
+    },
+
     role: {
       type: String,
       enum: ["user", "admin"],
       default: "user",
     },
+
     status: {
       type: String,
       enum: ["active", "blocked"],
       default: "active",
     },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+  },
 );
 
-export const UserModel = models.User || model<User>("User", userSchema);
+export const UserModel =
+  models.User || model<IUser>("User", userSchema);
