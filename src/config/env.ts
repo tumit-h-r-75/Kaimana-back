@@ -19,3 +19,15 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
+
+export const config = {
+  nodeEnv: env.NODE_ENV,
+  port: env.PORT,
+  mongodbUri: env.MONGODB_URI,
+  googleClientId: env.GOOGLE_CLIENT_ID,
+  googleClientSecret: env.GOOGLE_CLIENT_SECRET,
+  jwtSecret: env.JWT_SECRET,
+  frontendUrl: env.FRONTEND_URL,
+  pistonUrl: env.PISTON_URL,
+  anthropicApiKey: env.ANTHROPIC_API_KEY,
+};
