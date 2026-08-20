@@ -1,4 +1,4 @@
-import { model, models, Schema } from "mongoose";
+import mongoose, { model, Schema } from "mongoose";
 
 export interface IUser {
   googleId: string;
@@ -57,4 +57,4 @@ const userSchema = new Schema<IUser>(
 );
 
 export const UserModel =
-  models.User || model<IUser>("User", userSchema);
+  mongoose.models.User || model<IUser>("User", userSchema);
