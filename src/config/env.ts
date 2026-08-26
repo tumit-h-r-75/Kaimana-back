@@ -1,5 +1,9 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import { z } from "zod";
+
+// Vercel provides environment variables through process.env. Locally we use
+// the ignored .env.local file so development secrets never enter Git.
+dotenv.config({ path: ".env.local" });
 
 const optionalString = z.preprocess(
   (value) => (value === "" ? undefined : value),
