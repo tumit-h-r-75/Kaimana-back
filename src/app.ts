@@ -6,6 +6,7 @@ import cors from "cors";
 import { config } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
 import { authRouter } from "./modules/auth/auth.route.js";
+import { submissionRouter } from "./modules/submission/submission.route.js";
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.get("/api/health", (_req, res) => {
 
 // Mount real module routes here, e.g.
 app.use("/api/auth", authRouter);
+app.use("/api/submissions", submissionRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);
