@@ -10,17 +10,16 @@ const PORT = config.port;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Start server
-const startServer = async () => {
+const reconnectDatabase = async () => {
     try {
         await connectDatabase();
-        server.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
-        });
     } catch (error) {
-        console.error("Failed to start server:", error);
-        process.exit(1);
+        console.error("MongoDB connection failed; retrying in 10 seconds:", error);
+        setTimeout(reconnectDatabase, 10_000);
     }
 };
 
-startServer();
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    void reconnectDatabase();
+});

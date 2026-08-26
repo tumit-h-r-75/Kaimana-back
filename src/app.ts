@@ -6,7 +6,9 @@ import cors from "cors";
 import { config } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
 import { authRouter } from "./modules/auth/auth.route.js";
+import { authController } from "./modules/auth/auth.controller.js";
 import { submissionRouter } from "./modules/submission/submission.route.js";
+import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
 
@@ -43,7 +45,11 @@ app.get("/api/health", (_req, res) => {
     });
 });
 
-// Mount real module routes here, e.g.
+// This endpoint only returns public OAuth configuration and does not require MongoDB.
+app.get("/api/auth/google/client-config", authController.googleClientConfig);
+
+// All remaining application routes require an active database connection.
+app.use(requireDatabase);
 app.use("/api/auth", authRouter);
 app.use("/api/submissions", submissionRouter);
 
