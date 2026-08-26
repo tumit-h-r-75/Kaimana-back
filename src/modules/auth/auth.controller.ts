@@ -5,8 +5,23 @@ import { sendResponse } from "../../utils/response.js";
 import { authService } from "./auth.service.js";
 import httpStatus from "http-status";
 import { config } from "../../config/env.js";
+import type { Request, Response } from "express";
 
 const isProduction = config.nodeEnv === "production";
+
+const googleClientConfig = (_req: Request, res: Response) => {
+    if (!config.googleClientId) {
+        return res.status(httpStatus.SERVICE_UNAVAILABLE).json({
+            success: false,
+            message: "Google sign-in is not configured.",
+        });
+    }
+
+    return res.status(httpStatus.OK).json({
+        success: true,
+        data: { clientId: config.googleClientId },
+    });
+};
 
 const googleAuth = catchAsync(async (req, res) => {
     const payload = req.body;
@@ -85,6 +100,7 @@ const logout = catchAsync(async (req, res) => {
 });
 
 export const authController = {
+    googleClientConfig,
     googleAuth,
     refreshToken,
     logout,

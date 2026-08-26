@@ -5,6 +5,7 @@ import { authController } from "./auth.controller.js";
 
 const router = express.Router();
 
+router.get("/google/client-config", authController.googleClientConfig);
 router.post("/google", authController.googleAuth);
 router.post("/refresh-token", authController.refreshToken);
 router.post("/logout", authController.logout);
