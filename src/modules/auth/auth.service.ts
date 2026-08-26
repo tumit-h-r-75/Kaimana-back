@@ -6,6 +6,10 @@ import { googleClient } from "../../integrations/google/googleAuth.js";
 import { UserModel } from "../../models/User.model.js";
 import { AppError } from "../../utils/errors.js";
 import { jwtUtils } from "../../utils/jwt.js";
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "crypto";
+import { promisify } from "util";
+
+const scrypt = promisify(scryptCallback);
 
 interface IGoogleLoginPayload {
     idToken: string;
@@ -133,7 +137,25 @@ const refreshToken = async (refreshToken: string) => {
     }
 }
 
-export const authService = {
-    googleAuthIntoDb,
-    refreshToken
-}
+const issueTokens = (user: { _id: unknown; name: string; email: string; role: "user" | "admin" }) => {
+    const payload = { _id: user._id, name: user.name, email: user.email, role: user.role };
+    return { accessToken: jwtUtils.createToken(payload, config.jwtAccessSecret, config.jwtAccessExpiresIn as SignOptions), refreshToken: jwtUtils.createToken(payload, config.jwtRefreshSecret, config.jwtRefreshExpiresIn as SignOptions) };
+};
+const hashPassword = async (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${(await scrypt(password, salt, 64) as Buffer).toString("hex")}`; };
+const passwordMatches = async (password: string, stored: string) => { const [salt, hash] = stored.split(":"); if (!salt || !hash) return false; const candidate = (await scrypt(password, salt, 64) as Buffer).toString("hex"); return timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(candidate, "hex")); };
+
+const registerWithPassword = async ({ name, email, password }: { name: string; email: string; password: string }) => {
+    if (name.trim().length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) throw new AppError("Enter a name, a valid email, and a password of at least 8 characters.", 400);
+    const normalizedEmail = email.toLowerCase().trim();
+    if (await UserModel.exists({ email: normalizedEmail })) throw new AppError("An account already exists for this email.", 409);
+    const user = await UserModel.create({ name: name.trim(), email: normalizedEmail, passwordHash: await hashPassword(password), role: "user", status: "active" });
+    return { user, ...issueTokens(user), isNewUser: true };
+};
+const loginWithPassword = async ({ email, password }: { email: string; password: string }) => {
+    const user = await UserModel.findOne({ email: email.toLowerCase().trim() }).select("+passwordHash");
+    if (!user?.passwordHash || !(await passwordMatches(password, user.passwordHash))) throw new AppError("Invalid email or password.", 401);
+    if (user.status === "blocked") throw new AppError("This account is blocked.", 403);
+    return { user, ...issueTokens(user), isNewUser: false };
+};
+
+export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken };

@@ -1,7 +1,8 @@
 import mongoose, { model, Schema } from "mongoose";
 
 export interface IUser {
-  googleId: string;
+  googleId?: string;
+  passwordHash?: string;
   name: string;
   email: string;
   profilePicUrl?: string;
@@ -15,8 +16,8 @@ const userSchema = new Schema<IUser>(
   {
     googleId: {
       type: String,
-      required: true,
       unique: true,
+      sparse: true,
       index: true,
     },
 
@@ -38,6 +39,7 @@ const userSchema = new Schema<IUser>(
       type: String,
       trim: true,
     },
+    passwordHash: { type: String, select: false },
 
     role: {
       type: String,

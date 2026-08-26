@@ -51,6 +51,22 @@ const googleAuth = catchAsync(async (req, res) => {
 
 })
 
+const setSessionCookies = (res: Response, accessToken: string, refreshToken: string) => {
+    const base = { httpOnly: true, secure: isProduction, sameSite: isProduction ? "none" as const : "lax" as const };
+    res.cookie("accessToken", accessToken, { ...base, maxAge: 1000 * 60 * 60 * 24 });
+    res.cookie("refreshToken", refreshToken, { ...base, maxAge: 1000 * 60 * 60 * 24 * 7 });
+};
+const register = catchAsync(async (req, res) => {
+    const result = await authService.registerWithPassword(req.body);
+    setSessionCookies(res, result.accessToken, result.refreshToken);
+    sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Account created", data: result });
+});
+const login = catchAsync(async (req, res) => {
+    const result = await authService.loginWithPassword(req.body);
+    setSessionCookies(res, result.accessToken, result.refreshToken);
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Logged in successfully", data: result });
+});
+
 const refreshToken = catchAsync(async (req, res) => {
     const { refreshToken } = req.cookies;
     const result = await authService.refreshToken(refreshToken);
@@ -102,6 +118,8 @@ const logout = catchAsync(async (req, res) => {
 export const authController = {
     googleClientConfig,
     googleAuth,
+    register,
+    login,
     refreshToken,
     logout,
 };
