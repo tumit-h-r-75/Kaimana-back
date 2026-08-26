@@ -12,7 +12,15 @@ const app = express();
 // Middleware
 app.use(
     cors({
-        origin: config.frontendUrl,
+        origin(origin, callback) {
+            // Health checks and server-to-server requests have no Origin.
+            // Browser requests must be explicitly listed in FRONTEND_URL.
+            if (!origin || config.frontendUrls.includes(origin.replace(/\/$/, ""))) {
+                return callback(null, true);
+            }
+
+            return callback(new Error("Origin is not allowed by CORS"));
+        },
         credentials: true,
     })
 );

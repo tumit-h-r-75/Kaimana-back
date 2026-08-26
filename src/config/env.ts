@@ -16,6 +16,7 @@ const envSchema = z.object({
   MONGODB_URI: optionalString,
   GOOGLE_CLIENT_ID: optionalString,
   GOOGLE_CLIENT_SECRET: optionalString,
+  // Comma-separated origins allow production and Vercel preview deployments.
   FRONTEND_URL: optionalString,
   PISTON_URL: optionalString,
   ANTHROPIC_API_KEY: optionalString,
@@ -33,7 +34,10 @@ export const config = {
   mongodbUri: env.MONGODB_URI,
   googleClientId: env.GOOGLE_CLIENT_ID,
   googleClientSecret: env.GOOGLE_CLIENT_SECRET,
-  frontendUrl: env.FRONTEND_URL,
+  frontendUrls: (env.FRONTEND_URL ?? "")
+    .split(",")
+    .map((url) => url.trim().replace(/\/$/, ""))
+    .filter(Boolean),
   pistonUrl: env.PISTON_URL,
   anthropicApiKey: env.ANTHROPIC_API_KEY,
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
