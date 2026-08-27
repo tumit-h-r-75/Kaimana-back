@@ -38,7 +38,7 @@ export const config = {
   mongodbUri: env.MONGODB_URI,
   googleClientId: env.GOOGLE_CLIENT_ID,
   googleClientSecret: env.GOOGLE_CLIENT_SECRET,
-  frontendUrls: (env.FRONTEND_URL ?? "")
+  frontendUrls: (env.FRONTEND_URL ?? "http://localhost:3000,http://127.0.0.1:3000")
     .split(",")
     .map((url) => url.trim().replace(/\/$/, ""))
     .filter(Boolean),

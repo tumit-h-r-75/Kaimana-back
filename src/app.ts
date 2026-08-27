@@ -18,7 +18,9 @@ app.use(
         origin(origin, callback) {
             // Health checks and server-to-server requests have no Origin.
             // Browser requests must be explicitly listed in FRONTEND_URL.
-            if (!origin || config.frontendUrls.includes(origin.replace(/\/$/, ""))) {
+            const normalizedOrigin = origin?.replace(/\/$/, "");
+            const isLocalDevelopmentOrigin = normalizedOrigin === "http://localhost:3000" || normalizedOrigin === "http://127.0.0.1:3000";
+            if (!origin || isLocalDevelopmentOrigin || config.frontendUrls.includes(normalizedOrigin ?? "")) {
                 return callback(null, true);
             }
 
