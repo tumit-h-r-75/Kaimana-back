@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import dns from "node:dns";
 import { env } from "./env.js";
 
 let databaseConnected = false;
@@ -16,6 +17,10 @@ export const connectDatabase = async (): Promise<typeof mongoose> => {
     return mongoose;
   }
   if (connectionPromise) return connectionPromise;
+
+  // Some serverless/Vercel runtimes cannot resolve MongoDB SRV records with
+  // the platform DNS resolver. Use public resolvers for the SRV lookup.
+  dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
   connectionPromise = mongoose.connect(env.MONGODB_URI, {
       serverSelectionTimeoutMS: 10_000,
