@@ -6,6 +6,7 @@ import { authService } from "./auth.service.js";
 import httpStatus from "http-status";
 import { config } from "../../config/env.js";
 import type { Request, Response } from "express";
+import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
 
 const isProduction = config.nodeEnv === "production";
 
@@ -115,6 +116,11 @@ const logout = catchAsync(async (req, res) => {
     });
 });
 
+const me = catchAsync(async (req: AuthenticatedRequest, res) => {
+    const user = await authService.getUserById(String(req.user?._id));
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Profile loaded", data: user });
+});
+
 export const authController = {
     googleClientConfig,
     googleAuth,
@@ -122,4 +128,5 @@ export const authController = {
     login,
     refreshToken,
     logout,
+    me,
 };
