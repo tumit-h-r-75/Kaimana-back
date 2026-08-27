@@ -45,13 +45,16 @@ const googleAuthIntoDb = async (payload: IGoogleLoginPayload) => {
         throw new AppError("Name is required", 400);
     }
 
-    const isUserExists = await UserModel.findOne({ googleId })
+    // Match by Google id first, then email, so a user who registered with
+    // email/password can safely link their Google account without a duplicate
+    // email-key error.
+    const isUserExists = await UserModel.findOne({ $or: [{ googleId }, { email: email.toLowerCase() }] });
     const isNewUser = !isUserExists
 
     const user = isUserExists
         ? await UserModel.findOneAndUpdate(
-            { googleId },
-            { name, email, profilePicUrl: picture },
+            { _id: isUserExists._id },
+            { googleId, name, email: email.toLowerCase(), profilePicUrl: picture },
             { new: true }
         )
         : await UserModel.create({
@@ -66,6 +69,7 @@ const googleAuthIntoDb = async (payload: IGoogleLoginPayload) => {
     if (!user) {
         throw new AppError("Failed to create or update user", 500);
     }
+    if (user.status === "blocked") throw new AppError("This account is blocked.", 403);
 
     const jwtPayload = {
         _id: user._id,
