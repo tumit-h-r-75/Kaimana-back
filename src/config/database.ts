@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { env } from "./env.js";
 
 let databaseConnected = false;
+let connectionPromise: Promise<typeof mongoose> | undefined;
 
 export const isDatabaseConnected = () => databaseConnected;
 
@@ -10,15 +11,22 @@ export const connectDatabase = async (): Promise<typeof mongoose> => {
     throw new Error("MONGODB_URI environment variable is required.");
   }
 
-  try {
-    const connection = await mongoose.connect(env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 10_000,
-    });
+  if (mongoose.connection.readyState === 1) {
     databaseConnected = true;
-    console.log(`MongoDB connected: ${connection.connection.host}`);
-    return connection;
-  } catch (error) {
-    databaseConnected = false;
-    throw error;
+    return mongoose;
   }
+  if (connectionPromise) return connectionPromise;
+
+  connectionPromise = mongoose.connect(env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10_000,
+    }).then((connection) => {
+      databaseConnected = true;
+      console.log(`MongoDB connected: ${connection.connection.host}`);
+      return connection;
+    }).catch((error) => {
+      databaseConnected = false;
+      connectionPromise = undefined;
+      throw error;
+    });
+  return connectionPromise;
 };
