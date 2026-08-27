@@ -154,7 +154,7 @@ const registerWithPassword = async ({ name, email, password }: { name: string; e
 const loginWithPassword = async ({ email, password }: { email: string; password: string }) => {
     const user = await UserModel.findOne({ email: email.toLowerCase().trim() }).select("+passwordHash");
     if (!user?.passwordHash || !(await passwordMatches(password, user.passwordHash))) throw new AppError("Invalid email or password.", 401);
-    if (user.status === "blocked") throw new AppError("This account is blocked.", 403);
+    if ((user as unknown as { status?: string }).status === "blocked") throw new AppError("This account is blocked.", 403);
     return { user, ...issueTokens(user), isNewUser: false };
 };
 
