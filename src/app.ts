@@ -46,6 +46,9 @@ app.get("/api/health", (_req, res) => {
         data: { timestamp: new Date().toISOString() },
     });
 });
+app.get("/health", (_req, res) => {
+    res.status(200).json({ success: true, message: "Kaimana API is healthy", data: { timestamp: new Date().toISOString() } });
+});
 
 // This endpoint only returns public OAuth configuration and does not require MongoDB.
 app.get("/api/auth/google/client-config", authController.googleClientConfig);

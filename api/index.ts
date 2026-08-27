@@ -12,7 +12,10 @@ export default async function handler(req: any, res: any) {
   // Keep the deployment health endpoint independent from MongoDB. This lets
   // Vercel (and humans) distinguish an unreachable function from a database
   // configuration problem.
-  if (req.url?.split("?")[0] === "/api/health") {
+  const requestPath = req.url?.split("?")[0];
+  // Public endpoints must remain available even while MongoDB is cold,
+  // unreachable, or still reconnecting.
+  if (requestPath === "/api/health" || requestPath === "/health" || requestPath === "/api/auth/google/client-config") {
     return app(req, res);
   }
 
