@@ -161,7 +161,7 @@ const loginWithPassword = async ({ email, password }: { email: string; password:
 const getUserById = async (id: string) => {
     const user = await UserModel.findById(id).select("name email profilePicUrl role status createdAt updatedAt").lean();
     if (!user) throw new AppError("User not found.", 404);
-    if (user.status === "blocked") throw new AppError("This account is blocked.", 403);
+    if ((user as unknown as { status?: string }).status === "blocked") throw new AppError("This account is blocked.", 403);
     return user;
 };
 
