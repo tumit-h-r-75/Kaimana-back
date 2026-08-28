@@ -42,7 +42,9 @@ export const config = {
     .split(",")
     .map((url) => url.trim().replace(/\/$/, ""))
     .filter(Boolean),
-  pistonUrl: env.PISTON_URL,
+  // Falls back to the free public Piston API so code execution works with
+  // zero setup. Set PISTON_URL to a self-hosted runner for higher limits.
+  pistonUrl: env.PISTON_URL ?? "https://emkc.org/api/v2/piston",
   anthropicApiKey: env.ANTHROPIC_API_KEY,
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
   jwtRefreshSecret: env.JWT_REFRESH_SECRET,
