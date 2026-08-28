@@ -1,7 +1,7 @@
 import { config } from "../../config/env.js";
 import { AppError } from "../../utils/errors.js";
 
-const allowedLanguages = new Set(["javascript", "typescript", "python"]);
+const allowedLanguages = new Set(["javascript", "typescript", "python", "cpp"]);
 
 // Judge-facing languages only: Python, C++, JavaScript (matches project scope).
 export type JudgeLanguage = "python" | "cpp" | "javascript";
