@@ -8,6 +8,7 @@ import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js"
 import { authRouter } from "./modules/auth/auth.route.js";
 import { authController } from "./modules/auth/auth.controller.js";
 import { submissionRouter } from "./modules/submission/submission.route.js";
+import { problemRouter } from "./modules/problem/problem.route.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
@@ -56,6 +57,7 @@ app.get("/api/auth/google/client-config", authController.googleClientConfig);
 // All remaining application routes require an active database connection.
 app.use(requireDatabase);
 app.use("/api/auth", authRouter);
+app.use("/api/problems", problemRouter);
 app.use("/api/submissions", submissionRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
