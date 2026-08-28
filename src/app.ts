@@ -12,6 +12,7 @@ import { problemRouter } from "./modules/problem/problem.route.js";
 import { leaderboardRouter } from "./modules/leaderboard/leaderboard.route.js";
 import { aiRouter } from "./modules/ai/ai.route.js";
 import { contestRouter } from "./modules/contest/contest.route.js";
+import { adminRouter } from "./modules/admin/admin.route.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
@@ -65,6 +66,7 @@ app.use("/api/submissions", submissionRouter);
 app.use("/api/leaderboard", leaderboardRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/contests", contestRouter);
+app.use("/api/admin", adminRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);
