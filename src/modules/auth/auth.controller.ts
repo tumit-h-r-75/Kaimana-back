@@ -69,7 +69,12 @@ const login = catchAsync(async (req, res) => {
 });
 
 const refreshToken = catchAsync(async (req, res) => {
-    const { refreshToken } = req.cookies;
+    // Accepts the refresh token from the cookie (when that works) or from
+    // the request body (the frontend's Bearer-token fallback, used because
+    // the frontend and backend are on different domains and browsers
+    // increasingly block cross-site cookies — see lib/api/client.ts on the
+    // frontend for the matching side of this).
+    const refreshToken = req.cookies?.refreshToken ?? (req.body as { refreshToken?: string } | undefined)?.refreshToken;
     const result = await authService.refreshToken(refreshToken);
     const { accessToken, refreshToken: newRefreshToken } = result;
 

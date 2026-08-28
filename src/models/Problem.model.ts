@@ -78,7 +78,12 @@ const problemSchema = new Schema<IProblem>(
 
 problemSchema.set("toJSON", {
   virtuals: true,
-  transform: (_doc, ret: Record<string, unknown>) => {
+  // `ret` is typed loosely here (matching Contest.model.ts /
+  // ContestParticipant.model.ts) because Mongoose's own `toJSON` transform
+  // signature doesn't satisfy `Record<string, unknown>` — the document's
+  // intersection type has no index signature. Every field access below is
+  // safe since this only deletes/renames known keys.
+  transform: (_doc, ret: any) => {
     ret.id = String(ret._id);
     delete ret._id;
     delete ret.__v;

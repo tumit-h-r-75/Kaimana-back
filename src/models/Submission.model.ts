@@ -88,7 +88,8 @@ submissionSchema.index({ userId: 1, problemId: 1, createdAt: -1 });
 
 submissionSchema.set("toJSON", {
   virtuals: true,
-  transform: (_doc, ret: Record<string, unknown>) => {
+  // See Problem.model.ts for why `ret` is typed loosely here.
+  transform: (_doc, ret: any) => {
     ret.id = String(ret._id);
     delete ret._id;
     delete ret.__v;
