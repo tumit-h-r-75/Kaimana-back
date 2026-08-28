@@ -3,6 +3,7 @@
 import { FilterQuery, Types } from "mongoose";
 import { IProblem, ProblemModel } from "../../models/Problem.model.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
+import { TestCaseModel } from "../../models/TestCase.model.js";
 import { AppError } from "../../utils/errors.js";
 
 // mongoose.models.Problem || model<IProblem>(...) (see Problem.model.ts) widens
@@ -142,10 +143,92 @@ const getProblemForJudging = async (problemId: string) => {
   return problem;
 };
 
+// Admin problem manager needs to see everything, including unpublished
+// drafts — unlike listProblems() (public browsing), which only surfaces
+// isPublished problems.
+interface IListAllProblemsQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+}
+
+const listAllForAdmin = async ({ page = 1, limit = 50, search }: IListAllProblemsQuery) => {
+  const filter: FilterQuery<IProblem> = {};
+  if (search) filter.title = { $regex: search.trim(), $options: "i" };
+
+  const safeLimit = Math.min(Math.max(limit, 1), 200);
+  const safePage = Math.max(page, 1);
+
+  const [items, total] = await Promise.all([
+    ProblemModel.find(filter)
+      .select("slug title difficulty tags basePoints isPublished createdAt")
+      .sort({ createdAt: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+    ProblemModel.countDocuments(filter),
+  ]);
+
+  return {
+    items: items.map((item) => ({
+      id: String(item._id),
+      slug: item.slug,
+      title: item.title,
+      difficulty: item.difficulty,
+      tags: item.tags,
+      basePoints: item.basePoints,
+      isPublished: item.isPublished,
+      createdAt: item.createdAt,
+    })),
+    total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};
+
+const getProblemByIdForAdmin = async (problemId: string) => {
+  if (!Types.ObjectId.isValid(problemId)) throw new AppError("Invalid problem id.", 400);
+  // .lean() skips the schema's toJSON transform (no automatic _id -> id),
+  // so build the same shape the rest of the API returns by hand.
+  const problem = (await ProblemModel.findById(problemId).lean()) as unknown as LeanProblem | null;
+  if (!problem) throw new AppError("Problem not found.", 404);
+  return {
+    id: String(problem._id),
+    slug: problem.slug,
+    title: problem.title,
+    statement: problem.statement,
+    inputFormat: problem.inputFormat,
+    outputFormat: problem.outputFormat,
+    constraints: problem.constraints,
+    difficulty: problem.difficulty,
+    tags: problem.tags,
+    timeLimitMs: problem.timeLimitMs,
+    memoryLimitMb: problem.memoryLimitMb,
+    basePoints: problem.basePoints,
+    isPublished: problem.isPublished,
+    sampleTests: problem.sampleTests,
+    starterCode: problem.starterCode,
+  };
+};
+
+// Hard delete. Cascades to the problem's own test cases (orphaned test
+// cases serve no purpose), but leaves past Submissions alone — they're a
+// historical record even if their problem is later removed.
+const deleteProblem = async (problemId: string) => {
+  if (!Types.ObjectId.isValid(problemId)) throw new AppError("Invalid problem id.", 400);
+  const problem = await ProblemModel.findByIdAndDelete(problemId);
+  if (!problem) throw new AppError("Problem not found.", 404);
+  await TestCaseModel.deleteMany({ problemId });
+  return problem;
+};
+
 export const problemService = {
   listProblems,
   getProblemBySlug,
   createProblem,
   updateProblem,
   getProblemForJudging,
+  listAllForAdmin,
+  getProblemByIdForAdmin,
+  deleteProblem,
 };

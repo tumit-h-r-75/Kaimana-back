@@ -56,6 +56,26 @@ const deleteTestCase = catchAsync(async (req, res) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Test case deleted", data: null });
 });
 
+const listAllForAdmin = catchAsync(async (req, res) => {
+  const { page, limit, search } = req.query;
+  const result = await problemService.listAllForAdmin({
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined,
+    search: typeof search === "string" ? search : undefined,
+  });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problems loaded", data: result });
+});
+
+const getByIdForAdmin = catchAsync(async (req, res) => {
+  const problem = await problemService.getProblemByIdForAdmin(String(req.params.id));
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problem loaded", data: problem });
+});
+
+const deleteProblem = catchAsync(async (req, res) => {
+  await problemService.deleteProblem(String(req.params.id));
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problem deleted", data: null });
+});
+
 export const problemController = {
   list,
   getBySlug,
@@ -65,4 +85,7 @@ export const problemController = {
   listTestCases,
   updateTestCase,
   deleteTestCase,
+  listAllForAdmin,
+  getByIdForAdmin,
+  deleteProblem,
 };
