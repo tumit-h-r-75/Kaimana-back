@@ -13,6 +13,9 @@ import { leaderboardRouter } from "./modules/leaderboard/leaderboard.route.js";
 import { aiRouter } from "./modules/ai/ai.route.js";
 import { contestRouter } from "./modules/contest/contest.route.js";
 import { adminRouter } from "./modules/admin/admin.route.js";
+import { analyticsRouter } from "./modules/analytics/analytics.route.js";
+import { interviewRouter } from "./modules/interview/interview.route.js";
+import { communityRouter } from "./modules/community/community.route.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
@@ -67,6 +70,9 @@ app.use("/api/leaderboard", leaderboardRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/contests", contestRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/analytics", analyticsRouter);
+app.use("/api/interview", interviewRouter);
+app.use("/api/community", communityRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);
