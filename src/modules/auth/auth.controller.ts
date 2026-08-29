@@ -58,7 +58,11 @@ const setSessionCookies = (res: Response, accessToken: string, refreshToken: str
     res.cookie("refreshToken", refreshToken, { ...base, maxAge: 1000 * 60 * 60 * 24 * 7 });
 };
 const register = catchAsync(async (req, res) => {
-    const result = await authService.registerWithPassword(req.body);
+    // req.file is set by avatarUpload (multer) only when the request was
+    // multipart/form-data with an "avatar" field — a plain JSON signup
+    // (no photo) leaves it undefined and registration proceeds without one.
+    const avatarBuffer = (req as Request & { file?: { buffer: Buffer } }).file?.buffer;
+    const result = await authService.registerWithPassword({ ...req.body, avatarBuffer });
     setSessionCookies(res, result.accessToken, result.refreshToken);
     sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Account created", data: result });
 });

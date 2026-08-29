@@ -24,6 +24,12 @@ const envSchema = z.object({
   FRONTEND_URL: optionalString,
   PISTON_URL: optionalString,
   ANTHROPIC_API_KEY: optionalString,
+  // Avatar uploads (see services/cloudinary.service.ts). Optional — when
+  // unset, registration/profile updates simply skip the image and the
+  // feature degrades gracefully instead of crashing the server.
+  CLOUDINARY_CLOUD_NAME: optionalString,
+  CLOUDINARY_API_KEY: optionalString,
+  CLOUDINARY_API_SECRET: optionalString,
   JWT_ACCESS_SECRET: z.string().min(1, "JWT_ACCESS_SECRET is required"),
   JWT_REFRESH_SECRET: z.string().min(1, "JWT_REFRESH_SECRET is required"),
   JWT_ACCESS_EXPIRES_IN: z.string().min(1, "JWT_ACCESS_EXPIRES_IN is required"),
@@ -46,6 +52,9 @@ export const config = {
   // zero setup. Set PISTON_URL to a self-hosted runner for higher limits.
   pistonUrl: env.PISTON_URL ?? "https://emkc.org/api/v2/piston",
   anthropicApiKey: env.ANTHROPIC_API_KEY,
+  cloudinaryCloudName: env.CLOUDINARY_CLOUD_NAME,
+  cloudinaryApiKey: env.CLOUDINARY_API_KEY,
+  cloudinaryApiSecret: env.CLOUDINARY_API_SECRET,
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
   jwtRefreshSecret: env.JWT_REFRESH_SECRET,
   jwtAccessExpiresIn: env.JWT_ACCESS_EXPIRES_IN,

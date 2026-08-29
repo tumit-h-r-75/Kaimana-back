@@ -3,6 +3,7 @@
 import { JwtPayload, SignOptions } from "jsonwebtoken";
 import { config } from "../../config/env.js";
 import { googleClient } from "../../integrations/google/googleAuth.js";
+import { cloudinaryService } from "../../integrations/cloudinary/cloudinary.service.js";
 import { UserModel } from "../../models/User.model.js";
 import { AppError } from "../../utils/errors.js";
 import { jwtUtils } from "../../utils/jwt.js";
@@ -148,11 +149,22 @@ const issueTokens = (user: { _id: unknown; name: string; email: string; role: "u
 const hashPassword = async (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${(await scrypt(password, salt, 64) as Buffer).toString("hex")}`; };
 const passwordMatches = async (password: string, stored: string) => { const [salt, hash] = stored.split(":"); if (!salt || !hash) return false; const candidate = (await scrypt(password, salt, 64) as Buffer).toString("hex"); return timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(candidate, "hex")); };
 
-const registerWithPassword = async ({ name, email, password }: { name: string; email: string; password: string }) => {
+const registerWithPassword = async ({ name, email, password, avatarBuffer }: { name: string; email: string; password: string; avatarBuffer?: Buffer }) => {
     if (name.trim().length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) throw new AppError("Enter a name, a valid email, and a password of at least 8 characters.", 400);
     const normalizedEmail = email.toLowerCase().trim();
     if (await UserModel.exists({ email: normalizedEmail })) throw new AppError("An account already exists for this email.", 409);
-    const user = await UserModel.create({ name: name.trim(), email: normalizedEmail, passwordHash: await hashPassword(password), role: "user", status: "active" });
+    // Uploads first, before creating the account, so a bad image (rejected
+    // or failed upload) never leaves behind a user with no way to retry the
+    // photo — the whole request just fails and the client tries again.
+    const profilePicUrl = avatarBuffer ? await cloudinaryService.uploadAvatar(avatarBuffer) : undefined;
+    const user = await UserModel.create({
+        name: name.trim(),
+        email: normalizedEmail,
+        passwordHash: await hashPassword(password),
+        role: "user",
+        status: "active",
+        ...(profilePicUrl ? { profilePicUrl } : {}),
+    });
     return { user, ...issueTokens(user), isNewUser: true };
 };
 const loginWithPassword = async ({ email, password }: { email: string; password: string }) => {
