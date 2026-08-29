@@ -141,6 +141,19 @@ const me = catchAsync(async (req: AuthenticatedRequest, res) => {
     sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Profile loaded", data: user });
 });
 
+const updateProfile = catchAsync(async (req: AuthenticatedRequest, res) => {
+    // Same optional-file pattern as register: req.file only exists when the
+    // request was multipart/form-data with an "avatar" field.
+    const avatarBuffer = (req as AuthenticatedRequest & { file?: { buffer: Buffer } }).file?.buffer;
+    const user = await authService.updateProfile({ userId: String(req.user?._id), name: req.body.name, avatarBuffer });
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Profile updated", data: user });
+});
+
+const changePassword = catchAsync(async (req: AuthenticatedRequest, res) => {
+    await authService.changePassword({ userId: String(req.user?._id), currentPassword: req.body.currentPassword, newPassword: req.body.newPassword });
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Password updated", data: null });
+});
+
 export const authController = {
     googleClientConfig,
     googleAuth,
@@ -149,4 +162,6 @@ export const authController = {
     refreshToken,
     logout,
     me,
+    updateProfile,
+    changePassword,
 };

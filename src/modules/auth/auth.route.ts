@@ -17,5 +17,7 @@ router.post("/google", authController.googleAuth);
 router.post("/refresh-token", authController.refreshToken);
 router.post("/logout", authController.logout);
 router.get("/me", requireAuth, authController.me);
+router.patch("/me", requireAuth, avatarUpload, authController.updateProfile);
+router.post("/change-password", requireAuth, authController.changePassword);
 
 export const authRouter = router;

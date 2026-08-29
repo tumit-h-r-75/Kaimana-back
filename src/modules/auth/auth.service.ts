@@ -175,10 +175,58 @@ const loginWithPassword = async ({ email, password }: { email: string; password:
 };
 
 const getUserById = async (id: string) => {
-    const user = await UserModel.findById(id).select("name email profilePicUrl role status createdAt updatedAt").lean();
+    // passwordHash is select:false on the schema (never returned by default)
+    // — pulled in here only to derive hasPassword, then stripped before the
+    // response goes out, so the frontend can tell a Google-only account
+    // apart from one with a password (and hide "Change password" for the
+    // former) without ever seeing the hash itself.
+    const user = await UserModel.findById(id).select("name email profilePicUrl role status createdAt updatedAt passwordHash").lean();
     if (!user) throw new AppError("User not found.", 404);
     if ((user as unknown as { status?: string }).status === "blocked") throw new AppError("This account is blocked.", 403);
+    const { passwordHash, ...rest } = user as typeof user & { passwordHash?: string };
+    return { ...rest, hasPassword: Boolean(passwordHash) };
+};
+
+// Profile editing (name + avatar) was never actually wired up — the
+// Cloudinary avatar pipeline above already anticipated it ("registration +
+// profile" in its own comment) but no route ever called it for anything but
+// registration, and there was no way at all to change your name afterward.
+const updateProfile = async ({ userId, name, avatarBuffer }: { userId: string; name?: string; avatarBuffer?: Buffer }) => {
+    const trimmedName = name?.trim();
+    if (trimmedName !== undefined && trimmedName.length < 2) throw new AppError("Name must be at least 2 characters.", 400);
+    if (trimmedName === undefined && !avatarBuffer) throw new AppError("Nothing to update — provide a name and/or a photo.", 400);
+
+    const update: { name?: string; profilePicUrl?: string } = {};
+    if (trimmedName) update.name = trimmedName;
+    // Same ordering rationale as registerWithPassword: upload before saving,
+    // so a rejected/failed image never leaves a half-applied update.
+    if (avatarBuffer) {
+        const profilePicUrl = await cloudinaryService.uploadAvatar(avatarBuffer);
+        if (profilePicUrl) update.profilePicUrl = profilePicUrl;
+    }
+
+    const user = await UserModel.findByIdAndUpdate(userId, update, { new: true })
+        .select("name email profilePicUrl role status createdAt updatedAt")
+        .lean();
+    if (!user) throw new AppError("User not found.", 404);
     return user;
 };
 
-export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById };
+const changePassword = async ({ userId, currentPassword, newPassword }: { userId: string; currentPassword?: string; newPassword?: string }) => {
+    if (!currentPassword || !newPassword) throw new AppError("Current password and a new password are required.", 400);
+    if (newPassword.length < 8) throw new AppError("New password must be at least 8 characters.", 400);
+
+    const user = await UserModel.findById(userId).select("+passwordHash");
+    if (!user) throw new AppError("User not found.", 404);
+    // A Google-only account (no passwordHash) has nothing to check the
+    // current password against — send a clear, specific reason instead of a
+    // generic "invalid password" that would just confuse a Google user.
+    if (!user.passwordHash) throw new AppError("This account signs in with Google and has no password to change.", 400);
+    if (!(await passwordMatches(currentPassword, user.passwordHash))) throw new AppError("Current password is incorrect.", 401);
+
+    user.passwordHash = await hashPassword(newPassword);
+    await user.save();
+    return { updated: true };
+};
+
+export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword };
