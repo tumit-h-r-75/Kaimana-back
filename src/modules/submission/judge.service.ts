@@ -1,7 +1,7 @@
-// Code execution judge pipeline service interacting with Piston and test cases.
+// Code execution judge pipeline service interacting with Judge0 and test cases.
 
-import type { JudgeLanguage } from "../../integrations/piston/piston.service.js";
-import { runAgainstTestCase } from "../../integrations/piston/piston.service.js";
+import type { JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
+import { runAgainstTestCase } from "../../integrations/judge0/judge0.service.js";
 import { problemService } from "../problem/problem.service.js";
 import { testCaseService } from "../problem/testcase.service.js";
 import type { IFailedTest, Verdict } from "../../models/Submission.model.js";
@@ -37,11 +37,13 @@ export const judgeSubmission = async (params: {
   const testCases = await testCaseService.getTestCasesForJudging(params.problemId);
 
   let maxRuntimeMs = 0;
+  let maxMemoryKb = 0;
 
   for (let index = 0; index < testCases.length; index += 1) {
     const testCase = testCases[index];
     const outcome = await runAgainstTestCase(params.language, params.code, testCase.input, problem.timeLimitMs);
     maxRuntimeMs = Math.max(maxRuntimeMs, outcome.runtimeMs);
+    maxMemoryKb = Math.max(maxMemoryKb, outcome.memoryKb);
 
     if (outcome.compileError) {
       return {
@@ -49,7 +51,7 @@ export const judgeSubmission = async (params: {
         passedTests: 0,
         totalTests: testCases.length,
         runtimeMs: maxRuntimeMs,
-        memoryKb: 0,
+        memoryKb: maxMemoryKb,
         errorMessage: outcome.compileError.slice(0, 2000),
       };
     }
@@ -60,7 +62,7 @@ export const judgeSubmission = async (params: {
         passedTests: index,
         totalTests: testCases.length,
         runtimeMs: maxRuntimeMs,
-        memoryKb: 0,
+        memoryKb: maxMemoryKb,
         failedTest: {
           index,
           input: testCase.isSample ? testCase.input : "[hidden]",
@@ -77,7 +79,7 @@ export const judgeSubmission = async (params: {
         passedTests: index,
         totalTests: testCases.length,
         runtimeMs: maxRuntimeMs,
-        memoryKb: 0,
+        memoryKb: maxMemoryKb,
         errorMessage: outcome.stderr.slice(0, 2000),
         failedTest: {
           index,
@@ -97,7 +99,7 @@ export const judgeSubmission = async (params: {
         passedTests: index,
         totalTests: testCases.length,
         runtimeMs: maxRuntimeMs,
-        memoryKb: 0,
+        memoryKb: maxMemoryKb,
         failedTest: {
           index,
           input: testCase.isSample ? testCase.input : "[hidden]",
@@ -114,6 +116,6 @@ export const judgeSubmission = async (params: {
     passedTests: testCases.length,
     totalTests: testCases.length,
     runtimeMs: maxRuntimeMs,
-    memoryKb: 0,
+    memoryKb: maxMemoryKb,
   };
 };

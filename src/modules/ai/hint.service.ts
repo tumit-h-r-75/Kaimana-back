@@ -6,7 +6,7 @@
 // hint grounded in the problem statement and the learner's current code.
 // Otherwise a deterministic, tag-driven hint bank keeps the feature useful
 // with zero setup — the same "Plan B" philosophy the judge already uses
-// for Piston.
+// for Judge0.
 
 import { ProblemModel, type IProblem } from "../../models/Problem.model.js";
 import { AppError } from "../../utils/errors.js";

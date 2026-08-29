@@ -22,7 +22,7 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: optionalString,
   // Comma-separated origins allow production and Vercel preview deployments.
   FRONTEND_URL: optionalString,
-  PISTON_URL: optionalString,
+  JUDGE0_URL: optionalString,
   ANTHROPIC_API_KEY: optionalString,
   // Avatar uploads (see services/cloudinary.service.ts). Optional — when
   // unset, registration/profile updates simply skip the image and the
@@ -48,9 +48,12 @@ export const config = {
     .split(",")
     .map((url) => url.trim().replace(/\/$/, ""))
     .filter(Boolean),
-  // Falls back to the free public Piston API so code execution works with
-  // zero setup. Set PISTON_URL to a self-hosted runner for higher limits.
-  pistonUrl: env.PISTON_URL ?? "https://emkc.org/api/v2/piston",
+  // Falls back to Judge0's free public demo instance so code execution works
+  // with zero setup (no API key). The free public Piston API this used to
+  // point at went whitelist-only in Feb 2026 and excludes portfolio/personal
+  // projects from that whitelist. Set JUDGE0_URL to a self-hosted or
+  // RapidAPI-fronted Judge0 instance for higher/more reliable limits.
+  judge0Url: env.JUDGE0_URL ?? "https://ce.judge0.com",
   anthropicApiKey: env.ANTHROPIC_API_KEY,
   cloudinaryCloudName: env.CLOUDINARY_CLOUD_NAME,
   cloudinaryApiKey: env.CLOUDINARY_API_KEY,

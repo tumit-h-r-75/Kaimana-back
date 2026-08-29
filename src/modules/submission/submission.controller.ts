@@ -1,7 +1,7 @@
 import type { Response } from "express";
 import httpStatus from "http-status";
-import { executeCode } from "../../integrations/piston/piston.service.js";
-import type { JudgeLanguage } from "../../integrations/piston/piston.service.js";
+import { executeCode } from "../../integrations/judge0/judge0.service.js";
+import type { JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
 import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
 import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
@@ -25,7 +25,7 @@ const execute = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
 const judgeLanguages = new Set<JudgeLanguage>(["python", "cpp", "javascript"]);
 
 // POST /api/submissions — the system-gate endpoint: create a PENDING
-// submission, judge it synchronously against Piston (no queue/worker
+// submission, judge it synchronously against Judge0 (no queue/worker
 // infrastructure on this Vercel deployment), then return the final verdict.
 const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { problemId, code, language, contestId } = req.body as {

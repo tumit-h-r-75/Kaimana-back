@@ -4,7 +4,7 @@
 // ANTHROPIC_API_KEY is not configured — e.g. local development, or a
 // deployment that hasn't set it yet — `askClaude` returns null instead of
 // throwing, and the caller is expected to fall back to a deterministic,
-// rule-based response. This mirrors the project's existing Piston "Plan B"
+// rule-based response. This mirrors the project's existing Judge0 "Plan B"
 // pattern: every AI-flavored endpoint works with zero setup, and gets
 // smarter automatically once a real API key is added.
 
