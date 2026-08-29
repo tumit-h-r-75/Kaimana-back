@@ -63,7 +63,17 @@ const getContestByIdentifier = async (identifier: string, userId?: string) => {
   const contest = await findContestByIdentifier(identifier);
   if (!contest || !contest.isPublished) throw new AppError("Contest not found.", 404);
 
-  const problems = await ProblemModel.find({ _id: { $in: contest.problems.map((entry) => entry.problemId) } })
+  // isPublished: true matches listProblems()/getBySlug() (public browsing) —
+  // without this, an unpublished draft attached to a contest rendered as a
+  // clickable problem-card link on the contest page (real slug, real title)
+  // that 404'd the moment anyone clicked it, since the actual problem page
+  // load does filter by isPublished. Now it degrades to the same
+  // "(unavailable)" placeholder the frontend already renders for a missing
+  // problem, instead of a dead link.
+  const problems = await ProblemModel.find({
+    _id: { $in: contest.problems.map((entry) => entry.problemId) },
+    isPublished: true,
+  })
     .select("slug title difficulty")
     .lean();
   const problemById = new Map(problems.map((problem) => [String(problem._id), problem]));

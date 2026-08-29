@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import httpStatus from "http-status";
+import { Types } from "mongoose";
 import { executeCode } from "../../integrations/judge0/judge0.service.js";
 import type { JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
 import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
@@ -36,6 +37,12 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   };
 
   if (!problemId || !code?.trim() || !language) throw new AppError("problemId, code, and language are required.", 400);
+  // A malformed id (or a stray "undefined"/"null" string from a broken
+  // caller) reaches Mongoose as a CastError, which the global error handler
+  // doesn't special-case — it falls through to a generic 500 instead of a
+  // clean 400. Validate the shape up front instead.
+  if (!Types.ObjectId.isValid(problemId)) throw new AppError("problemId is not a valid id.", 400);
+  if (contestId && !Types.ObjectId.isValid(contestId)) throw new AppError("contestId is not a valid id.", 400);
   if (!judgeLanguages.has(language as JudgeLanguage)) throw new AppError("Unsupported language. Use python, cpp, or javascript.", 400);
   if (code.length > 20_000) throw new AppError("Code is outside the allowed size limit.", 400);
 
@@ -67,6 +74,19 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
     });
     await submission.save();
   } catch (error) {
+    // An infra failure (Judge0's free demo unavailable/overloaded/timed out
+    // — surfaced as a 5xx AppError, see judge0.service.ts) is not the same
+    // thing as the user's code actually being broken. Recording it as a
+    // RUNTIME_ERROR with score 0 silently lied about why the submission
+    // failed and permanently penalized a correct solution for a transient
+    // outage. Delete the placeholder and return a clean, retryable error
+    // instead — the frontend already surfaces submit() failures via
+    // setSubmitError without creating a fake submission record.
+    const isInfraFailure = error instanceof AppError && error.statusCode >= 500;
+    if (isInfraFailure) {
+      await SubmissionModel.findByIdAndDelete(submission._id);
+      throw error;
+    }
     submission.set({ verdict: "RUNTIME_ERROR", errorMessage: (error as Error).message?.slice(0, 500) ?? "Judging failed." });
     await submission.save();
   }

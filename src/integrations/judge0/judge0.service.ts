@@ -149,7 +149,13 @@ export const runAgainstTestCase = async (
   const languageId = languageIds[language];
   if (!languageId) throw new AppError("Unsupported judge language.", 400);
 
-  const cpuTimeLimit = Math.max(timeLimitMs / 1000, 1);
+  // cpuTimeLimit must respect the problem's configured limit closely (a 1s
+  // floor here used to make any sub-second time limit unenforceable — a
+  // solution that should TLE at 500ms would get a full second and pass) and
+  // must never exceed wallTimeLimit's own cap, or Judge0 rejects the pair as
+  // invalid — the problem admin form allows any positive ms value with no
+  // upper bound, so both ends need clamping independently.
+  const cpuTimeLimit = Math.min(Math.max(timeLimitMs / 1000, 0.5), 15);
   const wallTimeLimit = Math.min(cpuTimeLimit + 5, 20);
 
   const startedAt = Date.now();

@@ -26,12 +26,17 @@ npm start
 - `PORT`
 - `MONGODB_URI`
 - `FRONTEND_URL`
-- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_ID` (optional — Google sign-in is hidden on the frontend until this is set)
 - `GOOGLE_CLIENT_SECRET`
-- `JWT_SECRET`
-- `JUDGE0_URL`
-- `ANTHROPIC_API_KEY`
-- `SOCKET_PORT`
+- `JWT_ACCESS_SECRET` (required)
+- `JWT_REFRESH_SECRET` (required)
+- `JWT_ACCESS_EXPIRES_IN` (required, e.g. `15m`)
+- `JWT_REFRESH_EXPIRES_IN` (required, e.g. `7d`)
+- `JUDGE0_URL` (optional — defaults to Judge0's free public demo, `https://ce.judge0.com`)
+- `ANTHROPIC_API_KEY` (optional — AI hints/interview features fall back to a deterministic response without it)
+- `CLOUDINARY_CLOUD_NAME` (optional — avatar upload is skipped without it)
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
 
 ## Folder Structure
 
