@@ -60,7 +60,13 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const problem = await problemService.getProblemForJudging(problemId);
     const result = await judgeSubmission({ problemId, language: language as JudgeLanguage, code });
-    const score = result.verdict === "ACCEPTED" ? computeScore({ basePoints: problem.basePoints, passedTests: result.passedTests, totalTests: result.totalTests }) : 0;
+    // Partial credit: score is proportional to how many test cases passed,
+    // not gated to a full ACCEPTED verdict. judge.service.ts stops at the
+    // first failing test, so `passedTests` already holds the count that
+    // ran clean before that point (0 for a COMPILATION_ERROR, since it
+    // never runs any test). computeScore() naturally returns 0 when
+    // passedTests is 0, so nothing needs a separate zero-score branch.
+    const score = computeScore({ basePoints: problem.basePoints, passedTests: result.passedTests, totalTests: result.totalTests });
 
     submission.set({
       verdict: result.verdict,

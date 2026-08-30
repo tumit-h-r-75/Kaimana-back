@@ -14,13 +14,17 @@ export interface LeaderboardEntry {
 
 // A user's "best score" on a problem is the highest score across all of
 // their submissions to it — re-submitting a worse attempt never lowers
-// their standing. Only problems with a positive best score (i.e. at least
-// one ACCEPTED submission scored them points) count toward problemsSolved.
+// their standing. Submissions now carry partial credit (see
+// submission.controller.ts), so a problem can contribute points to
+// totalScore without ever being fully solved — "problemsSolved" is
+// therefore tracked separately from score, off whether any submission for
+// that problem actually got a full ACCEPTED verdict.
 const bestScoresPipeline = (): PipelineStage[] => [
   {
     $group: {
       _id: { userId: "$userId", problemId: "$problemId" },
       bestScore: { $max: "$score" },
+      solved: { $max: { $cond: [{ $eq: ["$verdict", "ACCEPTED"] }, 1, 0] } },
     },
   },
   { $match: { bestScore: { $gt: 0 } } },
@@ -28,7 +32,7 @@ const bestScoresPipeline = (): PipelineStage[] => [
     $group: {
       _id: "$_id.userId",
       totalScore: { $sum: "$bestScore" },
-      problemsSolved: { $sum: 1 },
+      problemsSolved: { $sum: "$solved" },
     },
   },
   { $sort: { totalScore: -1, problemsSolved: -1 } },

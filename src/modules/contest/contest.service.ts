@@ -163,8 +163,17 @@ const getScoreboard = async (identifier: string) => {
 
   const rows = await SubmissionModel.aggregate([
     { $match: { contestId: contest._id } },
-    { $group: { _id: { userId: "$userId", problemId: "$problemId" }, bestScore: { $max: "$score" } } },
-    { $group: { _id: "$_id.userId", totalScore: { $sum: "$bestScore" }, problemsSolved: { $sum: { $cond: [{ $gt: ["$bestScore", 0] }, 1, 0] } } } },
+    // Same split as the global leaderboard (see leaderboard.service.ts):
+    // bestScore can now include partial credit, so "solved" is tracked
+    // separately off an actual ACCEPTED verdict rather than off score>0.
+    {
+      $group: {
+        _id: { userId: "$userId", problemId: "$problemId" },
+        bestScore: { $max: "$score" },
+        solved: { $max: { $cond: [{ $eq: ["$verdict", "ACCEPTED"] }, 1, 0] } },
+      },
+    },
+    { $group: { _id: "$_id.userId", totalScore: { $sum: "$bestScore" }, problemsSolved: { $sum: "$solved" } } },
     { $match: { totalScore: { $gt: 0 } } },
     { $sort: { totalScore: -1, problemsSolved: -1 } },
     { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "user" } },
