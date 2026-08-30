@@ -5,4 +5,5 @@ import { analyticsController } from "./analytics.controller.js";
 
 const router = express.Router();
 router.get("/me", requireAuth, analyticsController.getMine);
+router.get("/history", requireAuth, analyticsController.getHistory);
 export const analyticsRouter = router;

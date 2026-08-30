@@ -2,6 +2,7 @@
 import { Types, type PipelineStage } from "mongoose";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ProblemModel } from "../../models/Problem.model.js";
+import { AnalyticsSnapshotModel } from "../../models/Analytics.model.js";
 import type { Difficulty } from "../../models/Problem.model.js";
 
 export interface VerdictBreakdownEntry {
@@ -163,6 +164,20 @@ export const getMyAnalytics = async (userId: string): Promise<MyAnalytics> => {
     cursor.setUTCDate(cursor.getUTCDate() - 1);
   }
 
+  // Best-effort: persist today's numbers so getMyAnalyticsHistory() can
+  // chart progress over calendar days. Never let a snapshot-write failure
+  // fail the analytics read itself — the live numbers above are already
+  // computed and correct regardless of whether this succeeds.
+  try {
+    await AnalyticsSnapshotModel.findOneAndUpdate(
+      { userId: userObjectId, date: toDateKey(now) },
+      { totalSubmissions, acceptedSubmissions, problemsSolved, accuracyPercent, currentStreakDays },
+      { upsert: true },
+    );
+  } catch (snapshotError) {
+    console.error(`Failed to save analytics snapshot for user ${userId}:`, snapshotError);
+  }
+
   return {
     totalSubmissions,
     acceptedSubmissions,
@@ -176,4 +191,38 @@ export const getMyAnalytics = async (userId: string): Promise<MyAnalytics> => {
   };
 };
 
-export const analyticsService = { getMyAnalytics };
+export interface AnalyticsHistoryEntry {
+  date: string;
+  totalSubmissions: number;
+  acceptedSubmissions: number;
+  problemsSolved: number;
+  accuracyPercent: number;
+  currentStreakDays: number;
+}
+
+const MAX_HISTORY_DAYS = 90;
+const DEFAULT_HISTORY_DAYS = 30;
+
+// Snapshots are written newest-last as they accumulate day by day, but a
+// chart wants them oldest-first — fetch the most recent `days` rows
+// (sorted newest-first so `.limit()` keeps the right end of the range),
+// then reverse back into chronological order.
+export const getMyAnalyticsHistory = async (userId: string, days: number = DEFAULT_HISTORY_DAYS): Promise<AnalyticsHistoryEntry[]> => {
+  const safeDays = Math.min(Math.max(Math.trunc(days) || DEFAULT_HISTORY_DAYS, 1), MAX_HISTORY_DAYS);
+  const rows = await AnalyticsSnapshotModel.find({ userId: new Types.ObjectId(userId) })
+    .sort({ date: -1 })
+    .limit(safeDays)
+    .select("date totalSubmissions acceptedSubmissions problemsSolved accuracyPercent currentStreakDays -_id")
+    .lean();
+
+  return rows.reverse().map((row) => ({
+    date: row.date,
+    totalSubmissions: row.totalSubmissions,
+    acceptedSubmissions: row.acceptedSubmissions,
+    problemsSolved: row.problemsSolved,
+    accuracyPercent: row.accuracyPercent,
+    currentStreakDays: row.currentStreakDays,
+  }));
+};
+
+export const analyticsService = { getMyAnalytics, getMyAnalyticsHistory };

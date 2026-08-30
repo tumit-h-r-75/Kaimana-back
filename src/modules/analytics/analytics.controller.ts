@@ -12,4 +12,11 @@ const getMine = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Analytics loaded", data: result });
 });
 
-export const analyticsController = { getMine };
+const getHistory = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  const days = Number(req.query.days);
+  const result = await analyticsService.getMyAnalyticsHistory(userId, Number.isFinite(days) ? days : undefined);
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Analytics history loaded", data: result });
+});
+
+export const analyticsController = { getMine, getHistory };

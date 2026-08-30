@@ -12,8 +12,14 @@ import {
   type IInterviewMessage,
   type IInterviewSession,
 } from "../../models/InterviewSession.model.js";
+import { AIReportModel } from "../../models/AIReport.model.js";
 import { AppError } from "../../utils/errors.js";
 import { askClaude } from "../ai/ai.service.js";
+
+// Feedback previews on the session list are capped so a long AI report
+// doesn't blow up the payload of an endpoint meant to stay light — the
+// full text is always available from getSession().
+const REPORT_SUMMARY_PREVIEW_LENGTH = 160;
 
 // A candidate answers at most this many questions before the interview
 // closes out with feedback and a score.
@@ -169,6 +175,23 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
   session.messages.push({ role: "interviewer", content: feedback, createdAt: new Date() });
 
   await session.save();
+
+  // Best-effort: the interview itself already completed and saved above,
+  // so a failure writing the AIReport copy must never fail this request.
+  try {
+    await AIReportModel.create({
+      userId: session.userId,
+      type: "interview",
+      sourceId: session._id,
+      topic: session.topic,
+      difficulty: session.difficulty,
+      score: session.score,
+      summary: feedback,
+    });
+  } catch (reportError) {
+    console.error(`Failed to save AI report for interview session ${session._id}:`, reportError);
+  }
+
   return session;
 };
 
@@ -179,15 +202,36 @@ const listSessions = async (userId: string) => {
     .select("topic difficulty status score createdAt messages")
     .lean<(IInterviewSession & { _id: Types.ObjectId })[]>();
 
-  return sessions.map((s) => ({
-    id: String(s._id),
-    topic: s.topic,
-    difficulty: s.difficulty,
-    status: s.status,
-    score: s.score,
-    createdAt: s.createdAt,
-    messageCount: s.messages?.length ?? 0,
-  }));
+  // Joins each completed session against its (much lighter) AIReport row
+  // to surface a feedback preview here without ever loading `messages` —
+  // that's the entire reason AIReport exists as its own collection.
+  const completedIds = sessions.filter((s) => s.status === "completed").map((s) => s._id);
+  const reports = completedIds.length
+    ? await AIReportModel.find({ sourceId: { $in: completedIds } })
+        .select("sourceId summary")
+        .lean<{ sourceId: Types.ObjectId; summary: string }[]>()
+    : [];
+  const summaryBySourceId = new Map(reports.map((r) => [String(r.sourceId), r.summary]));
+
+  return sessions.map((s) => {
+    const fullSummary = summaryBySourceId.get(String(s._id));
+    const reportSummary = fullSummary
+      ? fullSummary.length > REPORT_SUMMARY_PREVIEW_LENGTH
+        ? `${fullSummary.slice(0, REPORT_SUMMARY_PREVIEW_LENGTH)}…`
+        : fullSummary
+      : undefined;
+
+    return {
+      id: String(s._id),
+      topic: s.topic,
+      difficulty: s.difficulty,
+      status: s.status,
+      score: s.score,
+      createdAt: s.createdAt,
+      messageCount: s.messages?.length ?? 0,
+      reportSummary,
+    };
+  });
 };
 
 const getSession = async (userId: string, sessionId: string) => {
