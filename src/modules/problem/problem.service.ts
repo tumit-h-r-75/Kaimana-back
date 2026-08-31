@@ -208,6 +208,12 @@ const getProblemByIdForAdmin = async (problemId: string) => {
     isPublished: problem.isPublished,
     sampleTests: problem.sampleTests,
     starterCode: problem.starterCode,
+    // Was silently dropped here even though create/update already accept
+    // and persist it — the admin edit form had no way to see or change a
+    // problem's reference solution once saved. Needed now so the admin UI
+    // can surface it (testgen.service.ts requires one to generate AI test
+    // cases: it's what supplies the ground-truth expected output).
+    referenceSolution: problem.referenceSolution,
   };
 };
 
