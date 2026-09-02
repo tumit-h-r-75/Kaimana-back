@@ -14,7 +14,7 @@ import {
 } from "../../models/InterviewSession.model.js";
 import { AIReportModel } from "../../models/AIReport.model.js";
 import { AppError } from "../../utils/errors.js";
-import { askAi } from "../ai/ai.service.js";
+import { askAi, isAiConfigured, getLastAiErrorDetail } from "../ai/ai.service.js";
 
 // Feedback previews on the session list are capped so a long AI report
 // doesn't blow up the payload of an endpoint meant to stay light — the
@@ -87,6 +87,18 @@ const pickOpeningQuestion = (topic: string): string => {
 const NO_AI_TURN_NOTE =
   "(Automatic answer-checking wasn't available for that turn, so I can't confirm whether it was right — keep going, and double-check it yourself against the concept.)";
 
+// Only ever adds anything when GEMINI_API_KEY IS set but the call still
+// failed — i.e. never for a deployment that genuinely hasn't configured
+// AI yet (that's expected Plan-B behavior and needs no explanation). Lets
+// a real misconfiguration (bad key format, wrong model, quota) show up
+// directly in the interview transcript, since server logs aren't always
+// within reach when debugging a live deployment.
+const aiDebugSuffix = (): string => {
+  if (!isAiConfigured()) return "";
+  const detail = getLastAiErrorDetail();
+  return ` [AI debug — GEMINI_API_KEY is set but the call failed: ${detail ?? "unknown error"}]`;
+};
+
 // Cycles through the topic's bank as the interview progresses; once
 // exhausted, falls back to a generic probing follow-up.
 const pickFollowUpQuestion = (topic: string, candidateTurnIndex: number): string => {
@@ -100,7 +112,7 @@ const pickFollowUpQuestion = (topic: string, candidateTurnIndex: number): string
     candidateTurnIndex < bank.length
       ? bank[candidateTurnIndex]
       : genericFollowUps[(candidateTurnIndex - bank.length) % genericFollowUps.length];
-  return `${NO_AI_TURN_NOTE} ${next}`;
+  return `${NO_AI_TURN_NOTE}${aiDebugSuffix()} ${next}`;
 };
 
 const OPENING_SYSTEM_PROMPT = `You are Kaimana's AI mock interviewer, a friendly but rigorous technical interviewer conducting a verbal-style mock coding interview.
@@ -139,8 +151,17 @@ const parseScore = (feedback: string): number | undefined => {
   return Math.min(Math.max(value, 0), 10);
 };
 
-const FALLBACK_CLOSING_FEEDBACK =
-  "That wraps up this mock interview. AI-scored feedback isn't available right now (no AI provider is configured), but you can review your full transcript above to reflect on your answers, the clarity of your explanations, and whether you covered time/space complexity for each approach. Keep practicing — talking through your reasoning out loud, the way you just did, is exactly the skill real interviews test.";
+// A function, not a constant, because the reason AI-scored feedback isn't
+// available differs — genuinely unconfigured vs configured-but-failing —
+// and saying "no AI provider is configured" when one actually IS
+// configured (just failing) was actively misleading whoever was debugging
+// a live deployment from this message alone.
+const fallbackClosingFeedback = (): string => {
+  const reason = isAiConfigured()
+    ? `AI-scored feedback isn't available right now (the request to Gemini failed).${aiDebugSuffix()}`
+    : "AI-scored feedback isn't available right now (no AI provider is configured).";
+  return `That wraps up this mock interview. ${reason} You can review your full transcript above to reflect on your answers, the clarity of your explanations, and whether you covered time/space complexity for each approach. Keep practicing — talking through your reasoning out loud, the way you just did, is exactly the skill real interviews test.`;
+};
 
 const loadOwnedSession = async (userId: string, sessionId: string) => {
   if (!Types.ObjectId.isValid(sessionId)) throw new AppError("Interview session not found.", 404);
@@ -198,7 +219,7 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
 
   const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nFull conversation:\n${transcriptFor(session.messages)}\n\nGive your closing feedback and score now.`;
   const aiFeedback = await askAi({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 300 });
-  const feedback = aiFeedback ?? FALLBACK_CLOSING_FEEDBACK;
+  const feedback = aiFeedback ?? fallbackClosingFeedback();
   const score = aiFeedback ? parseScore(aiFeedback) : undefined;
 
   session.status = "completed";

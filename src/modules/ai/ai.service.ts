@@ -24,13 +24,13 @@ import { config } from "../../config/env.js";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-// "gemini-2.5-flash": Google's fast, low-cost model, available on the
-// Google AI Studio free tier. Gemini model names change fairly often —
-// if this ever starts failing with a 404 "model not found", check the
-// current names at https://ai.google.dev/gemini-api/docs/models (or the
-// model picker in https://aistudio.google.com) and set GEMINI_MODEL in
-// the environment to override this default without a code change.
-const DEFAULT_MODEL = "gemini-2.5-flash";
+// "gemini-flash-latest": an alias Google keeps pointed at its current
+// recommended fast/low-cost model, instead of a version pinned by name
+// like "gemini-2.5-flash" — Gemini model names get retired often enough
+// (see https://ai.google.dev/gemini-api/docs/changelog) that a pinned
+// name tends to silently start 404ing a few months later. Override with
+// GEMINI_MODEL in the environment if this ever needs to be pinned again.
+const DEFAULT_MODEL = "gemini-flash-latest";
 const MODEL = config.geminiModel || DEFAULT_MODEL;
 
 export interface AskAiOptions {
@@ -41,15 +41,36 @@ export interface AskAiOptions {
 
 export const isAiConfigured = () => Boolean(config.geminiApiKey);
 
-export const askAi = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Promise<string | null> => {
-  if (!config.geminiApiKey) return null;
+// Diagnostic only — never includes the key itself. Lets a caller tell
+// "not configured" apart from "configured but this exact call failed"
+// (and why) without needing access to server logs. Module-scoped state
+// reflecting only the most recent askAi() call is good enough for that;
+// it's read right after the specific call it describes, never across
+// unrelated requests.
+let lastErrorDetail: string | null = null;
+export const getLastAiErrorDetail = () => lastErrorDetail;
 
-  const url = `${GEMINI_API_BASE}/${MODEL}:generateContent?key=${config.geminiApiKey}`;
+export const askAi = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Promise<string | null> => {
+  if (!config.geminiApiKey) {
+    lastErrorDetail = null;
+    return null;
+  }
+
+  const url = `${GEMINI_API_BASE}/${MODEL}:generateContent`;
 
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Google is moving from "AIzaSy…"-format keys passed as a ?key=
+        // query parameter to newer "AQ."-format keys sent via this
+        // header instead — AI Studio now issues AQ-format keys by
+        // default, and those are documented to fail the old query-param
+        // style with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED. The header works
+        // for both key formats, so this is a strict upgrade either way.
+        "x-goog-api-key": config.geminiApiKey,
+      },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -58,7 +79,9 @@ export const askAi = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): 
     });
 
     if (!response.ok) {
-      console.error("Gemini API error:", response.status, await response.text().catch(() => ""));
+      const bodyText = await response.text().catch(() => "");
+      console.error("Gemini API error:", response.status, bodyText);
+      lastErrorDetail = `HTTP ${response.status} (model: ${MODEL}) — ${bodyText.slice(0, 300)}`;
       return null;
     }
 
@@ -74,11 +97,18 @@ export const askAi = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): 
       .join("")
       .trim();
 
-    return text || null;
+    if (!text) {
+      lastErrorDetail = `Gemini returned no text (finishReason: ${payload.candidates?.[0]?.finishReason ?? "unknown"})`;
+      return null;
+    }
+
+    lastErrorDetail = null;
+    return text;
   } catch (error) {
+    lastErrorDetail = `Request failed: ${(error as Error).message}`;
     console.error("Gemini API request failed:", (error as Error).message);
     return null;
   }
 };
 
-export const aiService = { askAi, isAiConfigured };
+export const aiService = { askAi, isAiConfigured, getLastAiErrorDetail };
