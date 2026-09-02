@@ -9,6 +9,7 @@ import { sendResponse } from "../../utils/response.js";
 import { AppError } from "../../utils/errors.js";
 import { computeScore } from "../../utils/scoring.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
+import { HintUnlockModel, type IHintUnlock } from "../../models/HintUnlock.model.js";
 import { problemService } from "../problem/problem.service.js";
 import { judgeSubmission } from "./judge.service.js";
 
@@ -66,7 +67,21 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
     // ran clean before that point (0 for a COMPILATION_ERROR, since it
     // never runs any test). computeScore() naturally returns 0 when
     // passedTests is 0, so nothing needs a separate zero-score branch.
-    const score = computeScore({ basePoints: problem.basePoints, passedTests: result.passedTests, totalTests: result.totalTests });
+    //
+    // Hint penalty: any AI hints this learner has unlocked on this problem
+    // (see hint.service.ts) forfeit a percentage of every submission's
+    // score on it, not just the attempt made right after asking — a hint
+    // read once still applies going forward, the same way a wrong answer
+    // costs marks for good on a negative-marking exam.
+    const hintUnlock = await HintUnlockModel.findOne({ userId, problemId })
+      .select("penaltyPercent")
+      .lean<Pick<IHintUnlock, "penaltyPercent"> | null>();
+    const score = computeScore({
+      basePoints: problem.basePoints,
+      passedTests: result.passedTests,
+      totalTests: result.totalTests,
+      hintPenaltyPercent: hintUnlock?.penaltyPercent ?? 0,
+    });
 
     submission.set({
       verdict: result.verdict,

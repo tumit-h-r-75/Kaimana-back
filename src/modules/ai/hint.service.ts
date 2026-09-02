@@ -2,17 +2,28 @@
 //
 // Hints are progressive (level 1 = gentle nudge, level 2 = approach,
 // level 3 = near-implementation detail) and NEVER reveal the reference
-// solution's code. When ANTHROPIC_API_KEY is configured, Claude generates a
+// solution's code. When GEMINI_API_KEY is configured, Gemini generates a
 // hint grounded in the problem statement and the learner's current code.
 // Otherwise a deterministic, tag-driven hint bank keeps the feature useful
 // with zero setup — the same "Plan B" philosophy the judge already uses
 // for Judge0.
 
 import { ProblemModel, type IProblem } from "../../models/Problem.model.js";
+import { HintUnlockModel } from "../../models/HintUnlock.model.js";
 import { AppError } from "../../utils/errors.js";
-import { askClaude } from "./ai.service.js";
+import { askAi } from "./ai.service.js";
 
 const MAX_HINT_LEVEL = 3;
+
+// Negative marking, university-admission-test style: unlocking a hint tier
+// costs this percentage of the problem's basePoints, forfeited permanently
+// from every future submission's score on this problem (see scoring.ts and
+// HintUnlock.model.ts). Costs are cumulative and tiers unlock strictly in
+// order — index 0 is tier 1's cost, and so on. The frontend mirrors these
+// same numbers (components/hints/HintPanel.tsx) to show the cost in a
+// confirmation modal before the learner spends it; this array is the
+// source of truth the backend actually charges against.
+export const HINT_TIER_COSTS = [5, 15, 30];
 
 // Generic, tag-driven fallback hints. Keyed by the problem's first
 // recognized tag; a catch-all covers every other tag.
@@ -88,18 +99,46 @@ Rules you must always follow:
 - Be encouraging and specific to the problem given, not generic advice.`;
 
 export const getHint = async ({
+  userId,
   problemId,
   level,
   code,
 }: {
+  userId: string;
   problemId: string;
   level: number;
   code?: string;
 }) => {
-  const safeLevel = Math.min(Math.max(Math.trunc(level) || 1, 1), MAX_HINT_LEVEL);
+  const requestedLevel = Math.min(Math.max(Math.trunc(level) || 1, 1), MAX_HINT_LEVEL);
 
   const problem = await ProblemModel.findById(problemId).select("title statement constraints tags difficulty").lean<IProblem | null>();
   if (!problem) throw new AppError("Problem not found.", 404);
+
+  // Lazily create the unlock record on this learner's first hint request
+  // for this problem — everyone starts at tier 0 (nothing unlocked, no
+  // penalty) until they actually spend score on a hint.
+  let unlock = await HintUnlockModel.findOne({ userId, problemId });
+  if (!unlock) {
+    unlock = await HintUnlockModel.create({ userId, problemId, unlockedTier: 0, penaltyPercent: 0 });
+  }
+
+  // Tiers unlock strictly in order and can't be skipped: a request for a
+  // level further ahead than the next purchasable tier is clamped down to
+  // that tier, so a stale client (or a re-ordered request) can never pay
+  // for tier 1 and receive tier 3. A request for a tier already unlocked
+  // is a free replay — re-reading a hint you already paid for costs
+  // nothing more.
+  const nextPurchasableTier = unlock.unlockedTier + 1;
+  const safeLevel = requestedLevel > nextPurchasableTier ? nextPurchasableTier : requestedLevel;
+  const isNewUnlock = safeLevel > unlock.unlockedTier;
+
+  let cost = 0;
+  if (isNewUnlock) {
+    cost = HINT_TIER_COSTS[safeLevel - 1] ?? HINT_TIER_COSTS[HINT_TIER_COSTS.length - 1];
+    unlock.unlockedTier = safeLevel;
+    unlock.penaltyPercent = Math.min(100, unlock.penaltyPercent + cost);
+    await unlock.save();
+  }
 
   const prompt = `Problem: ${problem.title} (${problem.difficulty})
 Statement: ${problem.statement}
@@ -109,13 +148,18 @@ ${code?.trim() ? `The learner's current code attempt:\n${code.trim().slice(0, 20
 
 Give exactly one level-${safeLevel} hint.`;
 
-  const aiHint = await askClaude({ system: SYSTEM_PROMPT, prompt, maxTokens: 220 });
+  const aiHint = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 220 });
 
   return {
     level: safeLevel,
     maxLevel: MAX_HINT_LEVEL,
     hint: aiHint ?? buildFallbackHint(problem, safeLevel),
     source: aiHint ? "ai" : "rule-based",
+    // Score forfeited by this specific call (0 for a free replay of an
+    // already-unlocked tier) and the learner's running total on this
+    // problem — both as a percentage of the problem's basePoints.
+    cost,
+    penaltyPercent: unlock.penaltyPercent,
   };
 };
 
