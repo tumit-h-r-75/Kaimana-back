@@ -8,7 +8,9 @@ import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
 import { AppError } from "../../utils/errors.js";
 import { computeScore } from "../../utils/scoring.js";
+import { gemsForDifficulty } from "../../utils/gems.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
+import { UserModel } from "../../models/User.model.js";
 import { HintUnlockModel, type IHintUnlock } from "../../models/HintUnlock.model.js";
 import { problemService } from "../problem/problem.service.js";
 import { judgeSubmission } from "./judge.service.js";
@@ -58,6 +60,11 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
     verdict: "RUNNING",
   });
 
+  // Set inside the try block below on a first-time ACCEPTED, then read
+  // after — declared out here so it's in scope for the final response
+  // regardless of which path the judging run took.
+  let gemsAwarded = 0;
+
   try {
     const problem = await problemService.getProblemForJudging(problemId);
     const result = await judgeSubmission({ problemId, language: language as JudgeLanguage, code });
@@ -94,6 +101,24 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
       failedTest: result.failedTest,
     });
     await submission.save();
+
+    // Gems: a fixed, difficulty-scaled reward the first time this user
+    // gets ACCEPTED on this problem. Checked against every OTHER
+    // submission (excluding the one just saved) so re-solving an
+    // already-solved problem — or resubmitting the same passing code —
+    // never pays out twice.
+    if (result.verdict === "ACCEPTED") {
+      const alreadySolved = await SubmissionModel.exists({
+        userId,
+        problemId,
+        verdict: "ACCEPTED",
+        _id: { $ne: submission._id },
+      });
+      if (!alreadySolved) {
+        gemsAwarded = gemsForDifficulty(problem.difficulty);
+        await UserModel.findByIdAndUpdate(userId, { $inc: { gems: gemsAwarded } });
+      }
+    }
   } catch (error) {
     // An infra failure (Judge0's free demo unavailable/overloaded/timed out
     // — surfaced as a 5xx AppError, see judge0.service.ts) is not the same
@@ -112,7 +137,15 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
     await submission.save();
   }
 
-  sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Submission judged", data: submission });
+  // gemsAwarded rides along on the response only (not persisted on the
+  // submission document) so the frontend can show a "+N gems" toast right
+  // when it happens, without a second round trip.
+  sendResponse(res, {
+    success: true,
+    statusCode: httpStatus.CREATED,
+    message: "Submission judged",
+    data: { ...submission.toJSON(), gemsAwarded },
+  });
 });
 
 const getById = catchAsync(async (req: AuthenticatedRequest, res: Response) => {

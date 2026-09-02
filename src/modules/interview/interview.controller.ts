@@ -9,7 +9,7 @@ import { AppError } from "../../utils/errors.js";
 import { interviewService } from "./interview.service.js";
 
 const start = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const { topic, difficulty } = req.body as { topic?: string; difficulty?: string };
+  const { topic, difficulty, totalQuestions } = req.body as { topic?: string; difficulty?: string; totalQuestions?: number };
   if (!topic?.trim()) throw new AppError("topic is required.", 400);
   if (!difficulty || !["EASY", "MEDIUM", "HARD"].includes(difficulty)) {
     throw new AppError("difficulty is required and must be one of EASY, MEDIUM, HARD.", 400);
@@ -19,6 +19,10 @@ const start = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const session = await interviewService.startSession(userId, {
     topic: topic.trim(),
     difficulty: difficulty as "EASY" | "MEDIUM" | "HARD",
+    // Clamped server-side in startSession — an omitted, out-of-range, or
+    // malformed value here just falls back to the default question count
+    // rather than 400ing the whole request.
+    totalQuestions,
   });
 
   sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Interview session started", data: session });
