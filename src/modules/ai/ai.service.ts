@@ -51,12 +51,16 @@ let lastErrorDetail: string | null = null;
 export const getLastAiErrorDetail = () => lastErrorDetail;
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-// llama-3.3-70b-versatile: a Production (generally-available) model on
-// Groq's own model list, not a preview/experimental one — good
-// quality/speed tradeoff for short system+user-prompt text generation.
-// Override with GROQ_MODEL if Groq retires this before the code is
-// updated — see https://console.groq.com/docs/deprecations.
-const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
+// openai/gpt-oss-120b: a Production (generally-available), non-Enterprise-
+// gated model on Groq's own model list — good quality/speed tradeoff for
+// short system+user-prompt text generation. (llama-3.3-70b-versatile was
+// used here originally but Groq deprecated it/gated it to Enterprise
+// accounts, which started 404ing with model_not_found — Groq rotates its
+// supported model list more often than most providers, so re-check
+// https://console.groq.com/docs/models before assuming this one is still
+// current if it ever starts erroring the same way.) Override with
+// GROQ_MODEL if this gets retired before the code is updated.
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const GROQ_MODEL = config.groqModel || DEFAULT_GROQ_MODEL;
 
 const askGroq = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Promise<string | null> => {
@@ -177,7 +181,16 @@ const askGemini = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Pro
 
 export const askAi = async (options: AskAiOptions): Promise<string | null> => {
   if (config.groqApiKey) {
-    return askGroq(options);
+    const result = await askGroq(options);
+    // Genuinely fall back to Gemini when Groq is configured but the call
+    // itself failed (bad model name, rate limit, outage, account issue —
+    // see ai.service.ts's module comment) and Gemini is ALSO configured,
+    // not just when Groq isn't set up at all. Without this, having both
+    // keys set only ever protected against Groq being unconfigured, never
+    // against Groq being configured-but-broken — which is exactly the
+    // failure mode a "fallback provider" is supposed to cover.
+    if (result !== null || !config.geminiApiKey) return result;
+    return askGemini(options);
   }
   if (config.geminiApiKey) {
     return askGemini(options);

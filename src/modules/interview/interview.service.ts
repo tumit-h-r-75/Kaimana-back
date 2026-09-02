@@ -87,16 +87,20 @@ const pickOpeningQuestion = (topic: string): string => {
 const NO_AI_TURN_NOTE =
   "(Automatic answer-checking wasn't available for that turn, so I can't confirm whether it was right — keep going, and double-check it yourself against the concept.)";
 
-// Only ever adds anything when GEMINI_API_KEY IS set but the call still
-// failed — i.e. never for a deployment that genuinely hasn't configured
-// AI yet (that's expected Plan-B behavior and needs no explanation). Lets
-// a real misconfiguration (bad key format, wrong model, quota) show up
-// directly in the interview transcript, since server logs aren't always
-// within reach when debugging a live deployment.
+// Only ever adds anything when an AI provider (Groq and/or Gemini — see
+// ai.service.ts) IS configured but the call still failed — i.e. never for
+// a deployment that genuinely hasn't configured AI yet (that's expected
+// Plan-B behavior and needs no explanation). Lets a real misconfiguration
+// (bad key format, wrong model, quota, account issue) show up directly in
+// the interview transcript, since server logs aren't always within reach
+// when debugging a live deployment. `detail` is already provider-prefixed
+// (e.g. "Groq: HTTP 404 ...") by ai.service.ts, so this message doesn't
+// name a specific provider or env var itself — whichever one actually ran
+// is named in `detail`.
 const aiDebugSuffix = (): string => {
   if (!isAiConfigured()) return "";
   const detail = getLastAiErrorDetail();
-  return ` [AI debug — GEMINI_API_KEY is set but the call failed: ${detail ?? "unknown error"}]`;
+  return ` [AI debug — an AI provider is configured but the call failed: ${detail ?? "unknown error"}]`;
 };
 
 // Cycles through the topic's bank as the interview progresses; once
@@ -158,7 +162,7 @@ const parseScore = (feedback: string): number | undefined => {
 // a live deployment from this message alone.
 const fallbackClosingFeedback = (): string => {
   const reason = isAiConfigured()
-    ? `AI-scored feedback isn't available right now (the request to Gemini failed).${aiDebugSuffix()}`
+    ? `AI-scored feedback isn't available right now (the AI request failed).${aiDebugSuffix()}`
     : "AI-scored feedback isn't available right now (no AI provider is configured).";
   return `That wraps up this mock interview. ${reason} You can review your full transcript above to reflect on your answers, the clarity of your explanations, and whether you covered time/space complexity for each approach. Keep practicing — talking through your reasoning out loud, the way you just did, is exactly the skill real interviews test.`;
 };
