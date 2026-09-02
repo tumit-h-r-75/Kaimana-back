@@ -180,7 +180,7 @@ const getUserById = async (id: string) => {
     // response goes out, so the frontend can tell a Google-only account
     // apart from one with a password (and hide "Change password" for the
     // former) without ever seeing the hash itself.
-    const user = await UserModel.findById(id).select("name email profilePicUrl role status createdAt updatedAt passwordHash").lean();
+    const user = await UserModel.findById(id).select("name email profilePicUrl role status gems createdAt updatedAt passwordHash").lean();
     if (!user) throw new AppError("User not found.", 404);
     if ((user as unknown as { status?: string }).status === "blocked") throw new AppError("This account is blocked.", 403);
     const { passwordHash, ...rest } = user as typeof user & { passwordHash?: string };

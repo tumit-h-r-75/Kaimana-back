@@ -8,6 +8,11 @@ export interface IUser {
   profilePicUrl?: string;
   role: "user" | "admin";
   status: "active" | "blocked";
+  // Lightweight reward currency, separate from a problem's score — earned
+  // once per problem on first ACCEPTED (see utils/gems.ts and
+  // submission.controller.ts), shown in the site header. Never goes
+  // negative; nothing spends it yet.
+  gems: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +56,12 @@ const userSchema = new Schema<IUser>(
       type: String,
       enum: ["active", "blocked"],
       default: "active",
+    },
+
+    gems: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   {

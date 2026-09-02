@@ -21,9 +21,20 @@ import { askAi } from "../ai/ai.service.js";
 // full text is always available from getSession().
 const REPORT_SUMMARY_PREVIEW_LENGTH = 160;
 
-// A candidate answers at most this many questions before the interview
-// closes out with feedback and a score.
-const MAX_CANDIDATE_TURNS = 5;
+// A candidate picks how many questions to answer on the start form (see
+// app/interview/page.tsx); this is the range that's offered and enforced
+// server-side, plus the default when nothing was chosen. Each session then
+// stores its own totalQuestions (see InterviewSession.model.ts) so a
+// session already in progress isn't affected by later changes here.
+const MIN_TOTAL_QUESTIONS = 3;
+const MAX_TOTAL_QUESTIONS = 10;
+const DEFAULT_TOTAL_QUESTIONS = 5;
+
+export const clampTotalQuestions = (value: unknown): number => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_TOTAL_QUESTIONS;
+  return Math.min(Math.max(Math.round(n), MIN_TOTAL_QUESTIONS), MAX_TOTAL_QUESTIONS);
+};
 
 type Difficulty = "EASY" | "MEDIUM" | "HARD";
 
@@ -143,7 +154,7 @@ const loadOwnedSession = async (userId: string, sessionId: string) => {
 
 const startSession = async (
   userId: string,
-  { topic, difficulty }: { topic: string; difficulty: Difficulty },
+  { topic, difficulty, totalQuestions }: { topic: string; difficulty: Difficulty; totalQuestions?: number },
 ) => {
   const prompt = `Topic: ${topic}\nDifficulty: ${difficulty}\n\nAsk the candidate their opening interview question now.`;
   const aiQuestion = await askAi({ system: OPENING_SYSTEM_PROMPT, prompt, maxTokens: 200 });
@@ -153,6 +164,7 @@ const startSession = async (
     userId,
     topic,
     difficulty,
+    totalQuestions: clampTotalQuestions(totalQuestions),
     status: "in_progress",
     messages: [{ role: "interviewer", content: question, createdAt: new Date() }],
   });
@@ -167,8 +179,12 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
   session.messages.push({ role: "candidate", content: answer, createdAt: new Date() });
 
   const candidateTurns = session.messages.filter((m: IInterviewMessage) => m.role === "candidate").length;
+  // Older sessions created before totalQuestions existed fall back to the
+  // previous fixed length rather than reading undefined as 0 and closing
+  // out immediately on their next answer.
+  const totalQuestions = session.totalQuestions ?? DEFAULT_TOTAL_QUESTIONS;
 
-  if (candidateTurns < MAX_CANDIDATE_TURNS) {
+  if (candidateTurns < totalQuestions) {
     const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nConversation so far:\n${transcriptFor(session.messages)}\n\nAsk your next question or probe now.`;
     // maxTokens raised from 220: the prompt now requires an explicit
     // correctness evaluation before the follow-up question, not just the
@@ -215,7 +231,7 @@ const listSessions = async (userId: string) => {
   const sessions = await InterviewSessionModel.find({ userId })
     .sort({ createdAt: -1 })
     .limit(50)
-    .select("topic difficulty status score createdAt messages")
+    .select("topic difficulty totalQuestions status score createdAt messages")
     .lean<(IInterviewSession & { _id: Types.ObjectId })[]>();
 
   // Joins each completed session against its (much lighter) AIReport row
@@ -241,6 +257,7 @@ const listSessions = async (userId: string) => {
       id: String(s._id),
       topic: s.topic,
       difficulty: s.difficulty,
+      totalQuestions: s.totalQuestions ?? DEFAULT_TOTAL_QUESTIONS,
       status: s.status,
       score: s.score,
       createdAt: s.createdAt,
