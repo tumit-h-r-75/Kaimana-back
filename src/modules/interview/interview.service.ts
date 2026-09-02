@@ -1,7 +1,7 @@
 // Service managing mock interview session state, transcripts, and AI dialogue.
 //
 // Follows the same "Plan B" philosophy as hint.service.ts: when
-// ANTHROPIC_API_KEY isn't configured, askClaude returns null and every
+// GEMINI_API_KEY isn't configured, askAi returns null and every
 // interviewer turn (opening question, follow-up, closing feedback) falls
 // back to a deterministic, topic-keyed question bank so the interview
 // still runs end to end with zero setup.
@@ -14,7 +14,7 @@ import {
 } from "../../models/InterviewSession.model.js";
 import { AIReportModel } from "../../models/AIReport.model.js";
 import { AppError } from "../../utils/errors.js";
-import { askClaude } from "../ai/ai.service.js";
+import { askAi } from "../ai/ai.service.js";
 
 // Feedback previews on the session list are capped so a long AI report
 // doesn't blow up the payload of an endpoint meant to stay light — the
@@ -69,17 +69,27 @@ const pickOpeningQuestion = (topic: string): string => {
   return bank[Math.floor(Math.random() * bank.length)];
 };
 
+// Plan-B has no way to judge free-text answer correctness without an AI
+// call, so rather than silently skipping straight to the next question (the
+// original bug this note exists to prevent), it says so honestly instead of
+// pretending to grade the answer.
+const NO_AI_TURN_NOTE =
+  "(Automatic answer-checking wasn't available for that turn, so I can't confirm whether it was right — keep going, and double-check it yourself against the concept.)";
+
 // Cycles through the topic's bank as the interview progresses; once
 // exhausted, falls back to a generic probing follow-up.
 const pickFollowUpQuestion = (topic: string, candidateTurnIndex: number): string => {
   const bank = TOPIC_QUESTIONS[normalizeTopic(topic)] ?? TOPIC_QUESTIONS[DEFAULT_TOPIC];
-  if (candidateTurnIndex < bank.length) return bank[candidateTurnIndex];
   const genericFollowUps = [
     "Can you walk me through the time complexity of that approach?",
     "What's the space complexity of what you just described, and could you reduce it?",
     "Is there an edge case you'd want to double check before calling that solution done?",
   ];
-  return genericFollowUps[(candidateTurnIndex - bank.length) % genericFollowUps.length];
+  const next =
+    candidateTurnIndex < bank.length
+      ? bank[candidateTurnIndex]
+      : genericFollowUps[(candidateTurnIndex - bank.length) % genericFollowUps.length];
+  return `${NO_AI_TURN_NOTE} ${next}`;
 };
 
 const OPENING_SYSTEM_PROMPT = `You are Kaimana's AI mock interviewer, a friendly but rigorous technical interviewer conducting a verbal-style mock coding interview.
@@ -92,16 +102,19 @@ Rules you must always follow:
 
 const FOLLOW_UP_SYSTEM_PROMPT = `You are Kaimana's AI mock interviewer, continuing a live mock coding interview.
 Rules you must always follow:
-- Ask exactly ONE natural follow-up question, or gently probe a weak point in the candidate's last answer.
-- Keep it to 2-4 sentences.
-- Never solve the problem for the candidate, and never reveal a full solution.
-- Stay encouraging but rigorous, like a real technical interviewer.
-- Output only the question/probe, no preamble.`;
+- FIRST, explicitly evaluate the candidate's last answer in 1-2 sentences: clearly say whether it was correct, partially correct, or incorrect/off-topic, and briefly why. Do this every single turn, even for a short, vague, wrong, or nonsense answer — never skip straight to the next question without judging the last one.
+- If the answer was incorrect, incomplete, or missed the point, briefly state what the correct idea actually is at a conceptual level (not full code) before moving on.
+- THEN ask exactly ONE natural follow-up question, or probe deeper on the weak point you just identified.
+- Keep the whole response (evaluation + question) to 3-6 sentences total.
+- Never solve the problem for the candidate beyond the brief correction above, and never reveal full code.
+- Stay encouraging but honest and rigorous, like a real technical interviewer — do not praise or wave through an answer that was actually wrong.
+- Output only the evaluation followed by the question/probe, no preamble like "Sure!" or "Great question!".`;
 
 const CLOSING_SYSTEM_PROMPT = `You are Kaimana's AI mock interviewer, wrapping up a mock coding interview.
 Rules you must always follow:
 - Give a brief, constructive 3-5 sentence summary of the candidate's performance across the conversation: strengths, and one or two areas to improve.
-- Be encouraging but honest.
+- Ground it in what actually happened — refer to specific answers the candidate got right or wrong during the conversation, not generic advice that could apply to anyone.
+- Be encouraging but honest — if several answers were wrong, the summary and score must reflect that, not soften it.
 - End your response with a final line, on its own, in exactly this format: "Score: N/10" where N is an integer from 0 to 10.`;
 
 const transcriptFor = (messages: IInterviewMessage[]): string =>
@@ -133,7 +146,7 @@ const startSession = async (
   { topic, difficulty }: { topic: string; difficulty: Difficulty },
 ) => {
   const prompt = `Topic: ${topic}\nDifficulty: ${difficulty}\n\nAsk the candidate their opening interview question now.`;
-  const aiQuestion = await askClaude({ system: OPENING_SYSTEM_PROMPT, prompt, maxTokens: 200 });
+  const aiQuestion = await askAi({ system: OPENING_SYSTEM_PROMPT, prompt, maxTokens: 200 });
   const question = aiQuestion ?? pickOpeningQuestion(topic);
 
   const session = await InterviewSessionModel.create({
@@ -157,7 +170,10 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
 
   if (candidateTurns < MAX_CANDIDATE_TURNS) {
     const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nConversation so far:\n${transcriptFor(session.messages)}\n\nAsk your next question or probe now.`;
-    const aiFollowUp = await askClaude({ system: FOLLOW_UP_SYSTEM_PROMPT, prompt, maxTokens: 220 });
+    // maxTokens raised from 220: the prompt now requires an explicit
+    // correctness evaluation before the follow-up question, not just the
+    // question alone.
+    const aiFollowUp = await askAi({ system: FOLLOW_UP_SYSTEM_PROMPT, prompt, maxTokens: 320 });
     const followUp = aiFollowUp ?? pickFollowUpQuestion(session.topic, candidateTurns);
     session.messages.push({ role: "interviewer", content: followUp, createdAt: new Date() });
     await session.save();
@@ -165,7 +181,7 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
   }
 
   const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nFull conversation:\n${transcriptFor(session.messages)}\n\nGive your closing feedback and score now.`;
-  const aiFeedback = await askClaude({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 300 });
+  const aiFeedback = await askAi({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 300 });
   const feedback = aiFeedback ?? FALLBACK_CLOSING_FEEDBACK;
   const score = aiFeedback ? parseScore(aiFeedback) : undefined;
 
