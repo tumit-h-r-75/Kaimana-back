@@ -23,8 +23,18 @@ const envSchema = z.object({
   // Comma-separated origins allow production and Vercel preview deployments.
   FRONTEND_URL: optionalString,
   JUDGE0_URL: optionalString,
-  // Google AI Studio key for Gemini (see modules/ai/ai.service.ts). Replaces
-  // the old ANTHROPIC_API_KEY — Gemini has a free tier, Claude doesn't.
+  // Groq (see modules/ai/ai.service.ts) is the PRIMARY AI provider — a free,
+  // no-credit-card API tier with much lower latency than Gemini's free
+  // tier (the reason this got added: Gemini was reported as noticeably
+  // slow). When set, every AI feature calls Groq first.
+  GROQ_API_KEY: optionalString,
+  // Override only if the default model in ai.service.ts gets retired by
+  // Groq before this code is updated — see console.groq.com/docs/deprecations.
+  GROQ_MODEL: optionalString,
+  // Google AI Studio key for Gemini (see modules/ai/ai.service.ts). Kept as
+  // a FALLBACK provider — used only when GROQ_API_KEY isn't set, so an
+  // existing Gemini setup (once its account-level access issue is
+  // resolved) still works without needing Groq configured too.
   GEMINI_API_KEY: optionalString,
   // Override only if the default model in ai.service.ts gets renamed or
   // retired by Google before this code is updated — see that file's
@@ -60,6 +70,8 @@ export const config = {
   // projects from that whitelist. Set JUDGE0_URL to a self-hosted or
   // RapidAPI-fronted Judge0 instance for higher/more reliable limits.
   judge0Url: env.JUDGE0_URL ?? "https://ce.judge0.com",
+  groqApiKey: env.GROQ_API_KEY,
+  groqModel: env.GROQ_MODEL,
   geminiApiKey: env.GEMINI_API_KEY,
   geminiModel: env.GEMINI_MODEL,
   cloudinaryCloudName: env.CLOUDINARY_CLOUD_NAME,
