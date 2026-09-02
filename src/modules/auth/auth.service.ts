@@ -4,9 +4,12 @@ import { JwtPayload, SignOptions } from "jsonwebtoken";
 import { config } from "../../config/env.js";
 import { googleClient } from "../../integrations/google/googleAuth.js";
 import { cloudinaryService } from "../../integrations/cloudinary/cloudinary.service.js";
-import { UserModel } from "../../models/User.model.js";
+import { UserModel, type IUser } from "../../models/User.model.js";
+import { SubmissionModel } from "../../models/Submission.model.js";
+import { ProblemModel } from "../../models/Problem.model.js";
 import { AppError } from "../../utils/errors.js";
 import { jwtUtils } from "../../utils/jwt.js";
+import { gemsForDifficulty } from "../../utils/gems.js";
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 
@@ -174,17 +177,49 @@ const loginWithPassword = async ({ email, password }: { email: string; password:
     return { user, ...issueTokens(user), isNewUser: false };
 };
 
+// Gems shipped after some users had already solved problems the normal
+// way (submission.controller.ts only awards gems on a NEW first-ever
+// ACCEPTED, so an already-solved problem never re-triggers it). Rather
+// than a one-off migration script against production data, this backfills
+// lazily and idempotently: `.lean()` queries never apply schema defaults
+// for a field that was never actually written to the document, so an
+// account from before this feature has no `gems` key at all (not even
+// 0) — that missing key IS the "never backfilled" signal. Once computed
+// and persisted here, the key exists (even at 0) and this never runs
+// again for that user; a genuinely new user with nothing solved yet also
+// converges to a real, present 0 on their very first /auth/me call.
+const backfillGemsForUser = async (userId: string): Promise<number> => {
+    const solvedProblemIds = await SubmissionModel.distinct("problemId", { userId, verdict: "ACCEPTED" });
+    let total = 0;
+    if (solvedProblemIds.length > 0) {
+        const problems = await ProblemModel.find({ _id: { $in: solvedProblemIds } })
+            .select("difficulty")
+            .lean<{ difficulty: string }[]>();
+        total = problems.reduce((sum, problem) => sum + gemsForDifficulty(problem.difficulty), 0);
+    }
+    await UserModel.findByIdAndUpdate(userId, { $set: { gems: total } });
+    return total;
+};
+
 const getUserById = async (id: string) => {
     // passwordHash is select:false on the schema (never returned by default)
     // — pulled in here only to derive hasPassword, then stripped before the
     // response goes out, so the frontend can tell a Google-only account
     // apart from one with a password (and hide "Change password" for the
     // former) without ever seeing the hash itself.
-    const user = await UserModel.findById(id).select("name email profilePicUrl role status gems createdAt updatedAt passwordHash").lean();
+    const user = await UserModel.findById(id)
+        .select("name email profilePicUrl role status gems createdAt updatedAt passwordHash")
+        .lean<
+            (Pick<IUser, "name" | "email" | "profilePicUrl" | "role" | "status" | "gems" | "createdAt" | "updatedAt" | "passwordHash"> & {
+                _id: unknown;
+            })
+            | null
+        >();
     if (!user) throw new AppError("User not found.", 404);
-    if ((user as unknown as { status?: string }).status === "blocked") throw new AppError("This account is blocked.", 403);
-    const { passwordHash, ...rest } = user as typeof user & { passwordHash?: string };
-    return { ...rest, hasPassword: Boolean(passwordHash) };
+    if (user.status === "blocked") throw new AppError("This account is blocked.", 403);
+    const { passwordHash, ...rest } = user;
+    const gems = typeof rest.gems === "number" ? rest.gems : await backfillGemsForUser(id);
+    return { ...rest, gems, hasPassword: Boolean(passwordHash) };
 };
 
 // Profile editing (name + avatar) was never actually wired up — the
