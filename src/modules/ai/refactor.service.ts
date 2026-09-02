@@ -1,13 +1,13 @@
 // AI service for generating code refactoring and optimization recommendations.
 //
-// On an Accepted submission (per SRS F5), asks Claude for 1-3 concrete
+// On an Accepted submission (per SRS F5), asks Gemini for 1-3 concrete
 // refactor suggestions as structured JSON (title + rationale + full
 // refactored code) — schema-validated with one retry on a malformed
 // response, per SRS FR-BE-06. There's no rule-based Plan-B here unlike
 // hint/interview/audit: a credible code rewrite needs actual language
 // understanding, and synthesizing one without an LLM risks silently
 // handing back broken code labeled as an "improvement." Without
-// ANTHROPIC_API_KEY configured, this returns zero suggestions with an
+// GEMINI_API_KEY configured, this returns zero suggestions with an
 // explicit reason instead.
 //
 // "Apply" happens client-side (replaces the editor's content); "Verified"
@@ -19,7 +19,7 @@ import { Types } from "mongoose";
 import { SubmissionModel, type IRefactorSuggestion } from "../../models/Submission.model.js";
 import { judgeSubmission } from "../submission/judge.service.js";
 import { AppError } from "../../utils/errors.js";
-import { askClaude, isAiConfigured } from "./ai.service.js";
+import { askAi, isAiConfigured } from "./ai.service.js";
 import type { JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
 
 const MAX_SUGGESTIONS = 3;
@@ -75,7 +75,7 @@ export const generateRefactorSuggestions = async ({ userId, submissionId }: { us
     return {
       suggestions: [] as IRefactorSuggestion[],
       source: "unavailable" as const,
-      message: "AI refactor suggestions need an ANTHROPIC_API_KEY configured on the server.",
+      message: "AI refactor suggestions need a GEMINI_API_KEY configured on the server.",
     };
   }
 
@@ -83,7 +83,7 @@ export const generateRefactorSuggestions = async ({ userId, submissionId }: { us
 
   let parsed: ParsedSuggestion[] | null = null;
   for (let attempt = 0; attempt < 2 && !parsed; attempt += 1) {
-    const raw = await askClaude({ system: SYSTEM_PROMPT, prompt, maxTokens: 1800 });
+    const raw = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 1800 });
     if (raw) parsed = parseSuggestions(raw);
   }
 

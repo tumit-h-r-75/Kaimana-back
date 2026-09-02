@@ -1,7 +1,7 @@
 // AI service for the Automated Test Case Generator (F10).
 //
-// The one thing this deliberately does NOT trust Claude for is the
-// expected output. Claude is asked for INPUTS only — edge, random,
+// The one thing this deliberately does NOT trust Gemini for is the
+// expected output. Gemini is asked for INPUTS only — edge, random,
 // adversarial, and boundary cases inferred from the problem's statement
 // and constraints — and every generated input is then actually executed
 // against the problem's own reference solution through the same Judge0
@@ -20,7 +20,7 @@
 // No rule-based Plan-B, matching refactor.service.ts's reasoning: turning
 // a constraints paragraph into meaningful edge/adversarial cases needs
 // real language understanding, not string munging. Without
-// ANTHROPIC_API_KEY this returns zero generated cases with an explicit
+// GEMINI_API_KEY this returns zero generated cases with an explicit
 // "unavailable" reason.
 
 import { Types } from "mongoose";
@@ -29,7 +29,7 @@ import { problemService } from "../problem/problem.service.js";
 import { testCaseService } from "../problem/testcase.service.js";
 import { runAgainstTestCase, type JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
 import { AppError } from "../../utils/errors.js";
-import { askClaude, isAiConfigured } from "./ai.service.js";
+import { askAi, isAiConfigured } from "./ai.service.js";
 
 const MAX_GENERATED = 8;
 
@@ -81,7 +81,7 @@ export const generateTestCases = async ({ problemId }: { problemId: string }) =>
       requested: 0,
       discarded: 0,
       source: "unavailable" as const,
-      message: "AI test case generation needs an ANTHROPIC_API_KEY configured on the server.",
+      message: "AI test case generation needs a GEMINI_API_KEY configured on the server.",
     };
   }
 
@@ -103,7 +103,7 @@ Generate the test case inputs now.`;
 
   let parsed: ParsedCase[] | null = null;
   for (let attempt = 0; attempt < 2 && !parsed; attempt += 1) {
-    const raw = await askClaude({ system: SYSTEM_PROMPT, prompt, maxTokens: 1200 });
+    const raw = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 1200 });
     if (raw) parsed = parseGeneratedCases(raw);
   }
 

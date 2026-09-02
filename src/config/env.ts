@@ -23,7 +23,13 @@ const envSchema = z.object({
   // Comma-separated origins allow production and Vercel preview deployments.
   FRONTEND_URL: optionalString,
   JUDGE0_URL: optionalString,
-  ANTHROPIC_API_KEY: optionalString,
+  // Google AI Studio key for Gemini (see modules/ai/ai.service.ts). Replaces
+  // the old ANTHROPIC_API_KEY — Gemini has a free tier, Claude doesn't.
+  GEMINI_API_KEY: optionalString,
+  // Override only if the default model in ai.service.ts gets renamed or
+  // retired by Google before this code is updated — see that file's
+  // comment for where to check current model names.
+  GEMINI_MODEL: optionalString,
   // Avatar uploads (see services/cloudinary.service.ts). Optional — when
   // unset, registration/profile updates simply skip the image and the
   // feature degrades gracefully instead of crashing the server.
@@ -54,7 +60,8 @@ export const config = {
   // projects from that whitelist. Set JUDGE0_URL to a self-hosted or
   // RapidAPI-fronted Judge0 instance for higher/more reliable limits.
   judge0Url: env.JUDGE0_URL ?? "https://ce.judge0.com",
-  anthropicApiKey: env.ANTHROPIC_API_KEY,
+  geminiApiKey: env.GEMINI_API_KEY,
+  geminiModel: env.GEMINI_MODEL,
   cloudinaryCloudName: env.CLOUDINARY_CLOUD_NAME,
   cloudinaryApiKey: env.CLOUDINARY_API_KEY,
   cloudinaryApiSecret: env.CLOUDINARY_API_SECRET,

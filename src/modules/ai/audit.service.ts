@@ -8,14 +8,14 @@
 //   - Structural: a lightweight, dependency-free scan of the code itself
 //     (structuralAnalysis.ts) for nested-loop depth and recursion, used
 //     to corroborate — or flag disagreement with — the empirical estimate.
-// Claude then turns both signals into a plain-language explanation; with
-// no ANTHROPIC_API_KEY configured, a templated explanation built from the
+// Gemini then turns both signals into a plain-language explanation; with
+// no GEMINI_API_KEY configured, a templated explanation built from the
 // same numbers is used instead (same "Plan B" pattern as hint.service.ts
 // and interview.service.ts).
 //
 // Reports are cached on the submission itself (complexityReport) — a
 // submission's code never changes after it's created, so re-opening the
-// panel returns the cached report instead of re-running Judge0/Claude
+// panel returns the cached report instead of re-running Judge0/Gemini
 // (per SRS FR-BE-06's caching requirement).
 
 import { Types } from "mongoose";
@@ -26,7 +26,7 @@ import { runAgainstTestCase, type JudgeLanguage } from "../../integrations/judge
 import { analyzeStructure } from "../../utils/complexity/structuralAnalysis.js";
 import { estimateComplexityClass, complexityClassForLoopDepth, type CurveFitResult } from "../../utils/complexity/curveFit.js";
 import { AppError } from "../../utils/errors.js";
-import { askClaude } from "./ai.service.js";
+import { askAi } from "./ai.service.js";
 
 const MAX_SAMPLED_TEST_CASES = 6;
 
@@ -128,7 +128,7 @@ Empirical space fit: ${spaceFit ? `slope ${spaceFit.slope}, R² ${spaceFit.rSqua
 
 Explain this result to the learner.`;
 
-  const aiExplanation = await askClaude({ system: SYSTEM_PROMPT, prompt, maxTokens: 260 });
+  const aiExplanation = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 260 });
   const explanation = aiExplanation ?? buildFallbackExplanation(timeFit, spaceFit, structural, timeComplexity, spaceComplexity, confidence);
 
   const report: IComplexityReport = {

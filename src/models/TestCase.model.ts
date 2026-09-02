@@ -15,7 +15,7 @@ export interface ITestCase {
   // An `ai-generated` case starts `reviewed: false` and — critically — is
   // excluded from getTestCasesForJudging() until an admin approves it (see
   // testcase.service.ts): its expectedOutput was computed by running the
-  // problem's reference solution against a Claude-authored input, and while
+  // problem's reference solution against a Gemini-authored input, and while
   // that's a real execution rather than a guess, the *input* itself is
   // still AI-authored and unvetted, so nothing generated ever grades a
   // learner's submission before a human has looked at it.

@@ -33,7 +33,8 @@ npm start
 - `JWT_ACCESS_EXPIRES_IN` (required, e.g. `15m`)
 - `JWT_REFRESH_EXPIRES_IN` (required, e.g. `7d`)
 - `JUDGE0_URL` (optional — defaults to Judge0's free public demo, `https://ce.judge0.com`)
-- `ANTHROPIC_API_KEY` (optional — AI hints/interview features fall back to a deterministic response without it)
+- `GEMINI_API_KEY` (optional — Google AI Studio key, https://aistudio.google.com/apikey; AI hints/interview features fall back to a deterministic response without it)
+- `GEMINI_MODEL` (optional — overrides the default Gemini model if it gets renamed/retired; see `src/modules/ai/ai.service.ts`)
 - `CLOUDINARY_CLOUD_NAME` (optional — avatar upload is skipped without it)
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`

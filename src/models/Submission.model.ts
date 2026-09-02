@@ -28,7 +28,7 @@ export interface IScalingDataPoint {
 
 // Complexity Auditor (F4) report — populated by POST /api/ai/audit and
 // cached on the submission (see audit.service.ts) so re-opening the panel
-// never re-runs Judge0/Claude for the same code.
+// never re-runs Judge0/Gemini for the same code.
 export interface IComplexityReport {
   timeComplexity: string;
   spaceComplexity: string;
