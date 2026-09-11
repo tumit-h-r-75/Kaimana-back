@@ -7,7 +7,8 @@ import { z } from "zod";
 // Load the developer-local file when present; hosted environments continue to
 // use injected process.env values. `override: false` prevents local defaults
 // from replacing deployment secrets.
-dotenv.config({ path: path.resolve(process.cwd(), ".env.local"), override: false });
+dotenv.config({ path: path.resolve(process.cwd(), ".env"), override: false });
+dotenv.config({ path: path.resolve(process.cwd(), ".env.local"), override: true });
 
 const optionalString = z.preprocess(
   (value) => (value === "" ? undefined : value),
