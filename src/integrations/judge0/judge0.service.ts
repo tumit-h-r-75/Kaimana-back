@@ -1,35 +1,26 @@
 import { config } from "../../config/env.js";
 import { AppError } from "../../utils/errors.js";
 
-// The free public Piston API (emkc.org) went whitelist-only on 2026-02-15,
-// and the whitelist explicitly excludes portfolio/personal projects — so
-// this integration now targets Judge0 instead, defaulting to its free
-// public demo instance (ce.judge0.com, no API key required). Set
-// JUDGE0_URL to point at a self-hosted Judge0 (or RapidAPI-fronted)
-// instance for higher/more reliable limits; see config/env.ts.
-
+// Allowed languages for ad-hoc "Run" and official "Submit" execution
 const allowedLanguages = new Set(["javascript", "typescript", "python", "cpp"]);
 
-// Judge-facing languages only: Python, C++, JavaScript (matches project scope).
+// Judge-supported languages (matches core project scope)
 export type JudgeLanguage = "python" | "cpp" | "javascript";
 
-// Judge0 identifies runtimes by a numeric language_id rather than a name, and
-// that id is tied to a specific interpreter/compiler version. Pinned here (via
-// GET /languages on the public instance) to recent, stable versions rather
-// than baked into every call site.
+// Judge0 numeric language IDs pinned to stable interpreter/compiler versions
 const languageIds: Record<string, number> = {
-  python: 109, // Python (3.13.2)
-  cpp: 105, // C++ (GCC 14.1.0)
-  javascript: 102, // JavaScript (Node.js 22.08.0)
-  typescript: 101, // TypeScript (5.6.2) — "Run" only, not judge-supported
+  python: 109, // Python 3.13.2
+  cpp: 105, // C++ GCC 14.1.0
+  javascript: 102, // JavaScript Node.js 22.08.0
+  typescript: 101, // TypeScript 5.6.2
 };
 
-interface Judge0Status {
+export interface Judge0Status {
   id: number;
   description: string;
 }
 
-interface Judge0Result {
+export interface Judge0Result {
   token?: string;
   stdout: string | null;
   stderr: string | null;
@@ -40,17 +31,20 @@ interface Judge0Result {
   status: Judge0Status;
 }
 
-// Judge0 status ids (from GET /statuses on the public instance):
-// 1 In Queue, 2 Processing, 3 Accepted, 4 Wrong Answer, 5 Time Limit Exceeded,
-// 6 Compilation Error, 7-12 Runtime Error (SIGSEGV/SIGXFSZ/SIGFPE/SIGABRT/
-// NZEC/Other), 13 Internal Error, 14 Exec Format Error.
-const STATUS_TIME_LIMIT_EXCEEDED = 5;
-const STATUS_COMPILATION_ERROR = 6;
-const RUNTIME_ERROR_STATUS_IDS = new Set([7, 8, 9, 10, 11, 12, 14]);
-const STATUS_INTERNAL_ERROR = 13;
+// Judge0 Status IDs (from GET /statuses):
+// 1: In Queue, 2: Processing, 3: Accepted, 4: Wrong Answer
+// 5: Time Limit Exceeded, 6: Compilation Error
+// 7-11, 14: Runtime Errors (SIGSEGV/SIGFPE/SIGABRT/NZEC)
+// 12: Memory Limit Exceeded (SIGXFSZ)
+// 13: Internal Error
+export const STATUS_TIME_LIMIT_EXCEEDED = 5;
+export const STATUS_COMPILATION_ERROR = 6;
+export const STATUS_MEMORY_LIMIT_EXCEEDED = 12;
+export const RUNTIME_ERROR_STATUS_IDS = new Set([7, 8, 9, 10, 11, 14]);
+export const STATUS_INTERNAL_ERROR = 13;
 
-const POLL_INTERVAL_MS = 700;
-const MAX_POLLS = 12;
+export const POLL_INTERVAL_MS = 700;
+export const MAX_POLLS = 12;
 
 // POST + poll against Judge0's REST API. `wait=true` asks Judge0 to hold the
 // HTTP request open until the run finishes, but on the shared public demo
