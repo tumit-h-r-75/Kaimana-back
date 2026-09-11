@@ -13,6 +13,7 @@ import { SubmissionModel } from "../../models/Submission.model.js";
 import { UserModel } from "../../models/User.model.js";
 import { HintUnlockModel, type IHintUnlock } from "../../models/HintUnlock.model.js";
 import { problemService } from "../problem/problem.service.js";
+import { testCaseService } from "../problem/testcase.service.js";
 import { judgeSubmission } from "./judge.service.js";
 
 const recentExecutions = new Map<string, number[]>();
@@ -48,6 +49,10 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   if (contestId && !Types.ObjectId.isValid(contestId)) throw new AppError("contestId is not a valid id.", 400);
   if (!judgeLanguages.has(language as JudgeLanguage)) throw new AppError("Unsupported language. Use python, cpp, or javascript.", 400);
   if (code.length > 20_000) throw new AppError("Code is outside the allowed size limit.", 400);
+
+  // Pre-flight check: ensure problem exists and has configured test cases before creating DB record
+  await problemService.getProblemForJudging(problemId);
+  await testCaseService.getTestCasesForJudging(problemId);
 
   const userId = String(req.user?._id);
 
