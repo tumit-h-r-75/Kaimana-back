@@ -41,20 +41,17 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   };
 
   if (!problemId || !code?.trim() || !language) throw new AppError("problemId, code, and language are required.", 400);
-  // A malformed id (or a stray "undefined"/"null" string from a broken
-  // caller) reaches Mongoose as a CastError, which the global error handler
-  // doesn't special-case — it falls through to a generic 500 instead of a
-  // clean 400. Validate the shape up front instead.
   if (!Types.ObjectId.isValid(problemId)) throw new AppError("problemId is not a valid id.", 400);
   if (contestId && !Types.ObjectId.isValid(contestId)) throw new AppError("contestId is not a valid id.", 400);
   if (!judgeLanguages.has(language as JudgeLanguage)) throw new AppError("Unsupported language. Use python, cpp, or javascript.", 400);
   if (code.length > 20_000) throw new AppError("Code is outside the allowed size limit.", 400);
 
-  // Pre-flight check: ensure problem exists and has configured test cases before creating DB record
-  await problemService.getProblemForJudging(problemId);
-  await testCaseService.getTestCasesForJudging(problemId);
-
   const userId = String(req.user?._id);
+
+  // Pre-flight check: verify problem exists and has reviewed test cases BEFORE creating a DB record.
+  // Fixes Bug #3: prevents unconfigured problems from saving fake RUNTIME_ERROR submissions.
+  const problem = await problemService.getProblemForJudging(problemId);
+  await testCaseService.getTestCasesForJudging(problemId);
 
   const submission = await SubmissionModel.create({
     userId,
