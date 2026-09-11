@@ -41,7 +41,13 @@ export const judgeSubmission = async (params: {
 
   for (let index = 0; index < testCases.length; index += 1) {
     const testCase = testCases[index];
-    const outcome = await runAgainstTestCase(params.language, params.code, testCase.input, problem.timeLimitMs);
+    const outcome = await runAgainstTestCase(
+      params.language,
+      params.code,
+      testCase.input,
+      problem.timeLimitMs,
+      problem.memoryLimitMb,
+    );
     maxRuntimeMs = Math.max(maxRuntimeMs, outcome.runtimeMs);
     maxMemoryKb = Math.max(maxMemoryKb, outcome.memoryKb);
 
@@ -68,6 +74,23 @@ export const judgeSubmission = async (params: {
           input: testCase.isSample ? testCase.input : "[hidden]",
           expectedOutput: testCase.isSample ? testCase.expectedOutput : "[hidden]",
           actualOutput: "(timed out)",
+          isSample: testCase.isSample,
+        },
+      };
+    }
+
+    if (outcome.memoryExceeded) {
+      return {
+        verdict: "MEMORY_LIMIT_EXCEEDED",
+        passedTests: index,
+        totalTests: testCases.length,
+        runtimeMs: maxRuntimeMs,
+        memoryKb: maxMemoryKb,
+        failedTest: {
+          index,
+          input: testCase.isSample ? testCase.input : "[hidden]",
+          expectedOutput: testCase.isSample ? testCase.expectedOutput : "[hidden]",
+          actualOutput: "(memory limit exceeded)",
           isSample: testCase.isSample,
         },
       };
