@@ -123,34 +123,28 @@ export interface JudgeRunOutcome {
   stderr: string;
   exitCode: number | null;
   timedOut: boolean;
+  memoryExceeded: boolean;
   compileError: string | null;
   runtimeMs: number;
   memoryKb: number;
 }
 
 // Runs one submission's code against a single test case's stdin, for the
-// judge pipeline. Distinguishes compile errors, timeouts, and runtime
-// errors so judge.service.ts can map them to the right verdict. We never
-// send `expected_output` to Judge0 — judge.service.ts does its own lenient
-// whitespace-tolerant comparison, so a plain "Accepted" here just means
-// "ran to completion with exit code 0", not "matched the expected output".
+// judge pipeline. Distinguishes compile errors, timeouts, memory limit overruns,
+// and runtime errors so judge.service.ts can map them to the right verdict.
 export const runAgainstTestCase = async (
   language: JudgeLanguage,
   source: string,
   stdin: string,
   timeLimitMs: number,
+  memoryLimitMb: number = 256,
 ): Promise<JudgeRunOutcome> => {
   const languageId = languageIds[language];
   if (!languageId) throw new AppError("Unsupported judge language.", 400);
 
-  // cpuTimeLimit must respect the problem's configured limit closely (a 1s
-  // floor here used to make any sub-second time limit unenforceable — a
-  // solution that should TLE at 500ms would get a full second and pass) and
-  // must never exceed wallTimeLimit's own cap, or Judge0 rejects the pair as
-  // invalid — the problem admin form allows any positive ms value with no
-  // upper bound, so both ends need clamping independently.
   const cpuTimeLimit = Math.min(Math.max(timeLimitMs / 1000, 0.5), 15);
   const wallTimeLimit = Math.min(cpuTimeLimit + 5, 20);
+  const memoryLimitKb = Math.max(memoryLimitMb, 16) * 1024;
 
   const startedAt = Date.now();
   const result = await submitToJudge0({
@@ -159,26 +153,28 @@ export const runAgainstTestCase = async (
     stdin,
     cpu_time_limit: cpuTimeLimit,
     wall_time_limit: wallTimeLimit,
+    memory_limit: memoryLimitKb,
   });
   const runtimeMs = measuredRuntimeMs(result, startedAt);
   const memoryKb = result.memory ?? 0;
 
   if (result.status.id === STATUS_COMPILATION_ERROR) {
     const message = result.compile_output || result.message || "Compilation failed.";
-    return { stdout: "", stderr: message, exitCode: 1, timedOut: false, compileError: message, runtimeMs, memoryKb };
+    return { stdout: "", stderr: message, exitCode: 1, timedOut: false, memoryExceeded: false, compileError: message, runtimeMs, memoryKb };
   }
 
   if (result.status.id === STATUS_TIME_LIMIT_EXCEEDED) {
-    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: null, timedOut: true, compileError: null, runtimeMs, memoryKb };
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: null, timedOut: true, memoryExceeded: false, compileError: null, runtimeMs, memoryKb };
+  }
+
+  if (result.status.id === STATUS_MEMORY_LIMIT_EXCEEDED) {
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "Memory Limit Exceeded", exitCode: null, timedOut: false, memoryExceeded: true, compileError: null, runtimeMs, memoryKb };
   }
 
   if (RUNTIME_ERROR_STATUS_IDS.has(result.status.id)) {
     const message = result.stderr || result.message || result.status.description;
-    return { stdout: result.stdout ?? "", stderr: message, exitCode: 1, timedOut: false, compileError: null, runtimeMs, memoryKb };
+    return { stdout: result.stdout ?? "", stderr: message, exitCode: 1, timedOut: false, memoryExceeded: false, compileError: null, runtimeMs, memoryKb };
   }
 
-  // Accepted (3), or Wrong Answer (4) — unreachable since we never pass
-  // expected_output, kept only as a defensive fallback — both mean the
-  // program ran to completion with exit code 0.
-  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: 0, timedOut: false, compileError: null, runtimeMs, memoryKb };
+  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: 0, timedOut: false, memoryExceeded: false, compileError: null, runtimeMs, memoryKb };
 };
