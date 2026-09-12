@@ -57,7 +57,7 @@ export interface ISubmission {
   userId: Types.ObjectId;
   problemId: Types.ObjectId;
   contestId?: Types.ObjectId;
-  language: "python" | "cpp" | "javascript";
+  language: "python" | "cpp" | "javascript" | "typescript";
   code: string;
   verdict: Verdict;
   passedTests: number;
@@ -121,7 +121,7 @@ const submissionSchema = new Schema<ISubmission>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     problemId: { type: Schema.Types.ObjectId, ref: "Problem", required: true, index: true },
     contestId: { type: Schema.Types.ObjectId, ref: "Contest" },
-    language: { type: String, enum: ["python", "cpp", "javascript"], required: true },
+    language: { type: String, enum: ["python", "cpp", "javascript", "typescript"], required: true },
     code: { type: String, required: true },
     verdict: {
       type: String,
