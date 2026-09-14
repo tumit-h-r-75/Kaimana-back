@@ -1,35 +1,26 @@
 import { config } from "../../config/env.js";
 import { AppError } from "../../utils/errors.js";
 
-// The free public Piston API (emkc.org) went whitelist-only on 2026-02-15,
-// and the whitelist explicitly excludes portfolio/personal projects — so
-// this integration now targets Judge0 instead, defaulting to its free
-// public demo instance (ce.judge0.com, no API key required). Set
-// JUDGE0_URL to point at a self-hosted Judge0 (or RapidAPI-fronted)
-// instance for higher/more reliable limits; see config/env.ts.
-
+// Allowed languages for ad-hoc "Run" and official "Submit" execution
 const allowedLanguages = new Set(["javascript", "typescript", "python", "cpp"]);
 
-// Judge-facing languages only: Python, C++, JavaScript (matches project scope).
+// Judge-supported languages (matches core project scope)
 export type JudgeLanguage = "python" | "cpp" | "javascript";
 
-// Judge0 identifies runtimes by a numeric language_id rather than a name, and
-// that id is tied to a specific interpreter/compiler version. Pinned here (via
-// GET /languages on the public instance) to recent, stable versions rather
-// than baked into every call site.
+// Judge0 numeric language IDs pinned to stable interpreter/compiler versions
 const languageIds: Record<string, number> = {
-  python: 109, // Python (3.13.2)
-  cpp: 105, // C++ (GCC 14.1.0)
-  javascript: 102, // JavaScript (Node.js 22.08.0)
-  typescript: 101, // TypeScript (5.6.2) — "Run" only, not judge-supported
+  python: 109, // Python 3.13.2
+  cpp: 105, // C++ GCC 14.1.0
+  javascript: 102, // JavaScript Node.js 22.08.0
+  typescript: 101, // TypeScript 5.6.2
 };
 
-interface Judge0Status {
+export interface Judge0Status {
   id: number;
   description: string;
 }
 
-interface Judge0Result {
+export interface Judge0Result {
   token?: string;
   stdout: string | null;
   stderr: string | null;
@@ -40,17 +31,20 @@ interface Judge0Result {
   status: Judge0Status;
 }
 
-// Judge0 status ids (from GET /statuses on the public instance):
-// 1 In Queue, 2 Processing, 3 Accepted, 4 Wrong Answer, 5 Time Limit Exceeded,
-// 6 Compilation Error, 7-12 Runtime Error (SIGSEGV/SIGXFSZ/SIGFPE/SIGABRT/
-// NZEC/Other), 13 Internal Error, 14 Exec Format Error.
-const STATUS_TIME_LIMIT_EXCEEDED = 5;
-const STATUS_COMPILATION_ERROR = 6;
-const RUNTIME_ERROR_STATUS_IDS = new Set([7, 8, 9, 10, 11, 12, 14]);
-const STATUS_INTERNAL_ERROR = 13;
+// Judge0 Status IDs (from GET /statuses):
+// 1: In Queue, 2: Processing, 3: Accepted, 4: Wrong Answer
+// 5: Time Limit Exceeded, 6: Compilation Error
+// 7-11, 14: Runtime Errors (SIGSEGV/SIGFPE/SIGABRT/NZEC)
+// 12: Memory Limit Exceeded (SIGXFSZ)
+// 13: Internal Error
+export const STATUS_TIME_LIMIT_EXCEEDED = 5;
+export const STATUS_COMPILATION_ERROR = 6;
+export const STATUS_MEMORY_LIMIT_EXCEEDED = 12;
+export const RUNTIME_ERROR_STATUS_IDS = new Set([7, 8, 9, 10, 11, 14]);
+export const STATUS_INTERNAL_ERROR = 13;
 
-const POLL_INTERVAL_MS = 700;
-const MAX_POLLS = 12;
+export const POLL_INTERVAL_MS = 700;
+export const MAX_POLLS = 12;
 
 // POST + poll against Judge0's REST API. `wait=true` asks Judge0 to hold the
 // HTTP request open until the run finishes, but on the shared public demo
@@ -129,34 +123,28 @@ export interface JudgeRunOutcome {
   stderr: string;
   exitCode: number | null;
   timedOut: boolean;
+  memoryExceeded: boolean;
   compileError: string | null;
   runtimeMs: number;
   memoryKb: number;
 }
 
 // Runs one submission's code against a single test case's stdin, for the
-// judge pipeline. Distinguishes compile errors, timeouts, and runtime
-// errors so judge.service.ts can map them to the right verdict. We never
-// send `expected_output` to Judge0 — judge.service.ts does its own lenient
-// whitespace-tolerant comparison, so a plain "Accepted" here just means
-// "ran to completion with exit code 0", not "matched the expected output".
+// judge pipeline. Distinguishes compile errors, timeouts, memory limit overruns,
+// and runtime errors so judge.service.ts can map them to the right verdict.
 export const runAgainstTestCase = async (
   language: JudgeLanguage,
   source: string,
   stdin: string,
   timeLimitMs: number,
+  memoryLimitMb: number = 256,
 ): Promise<JudgeRunOutcome> => {
   const languageId = languageIds[language];
   if (!languageId) throw new AppError("Unsupported judge language.", 400);
 
-  // cpuTimeLimit must respect the problem's configured limit closely (a 1s
-  // floor here used to make any sub-second time limit unenforceable — a
-  // solution that should TLE at 500ms would get a full second and pass) and
-  // must never exceed wallTimeLimit's own cap, or Judge0 rejects the pair as
-  // invalid — the problem admin form allows any positive ms value with no
-  // upper bound, so both ends need clamping independently.
   const cpuTimeLimit = Math.min(Math.max(timeLimitMs / 1000, 0.5), 15);
   const wallTimeLimit = Math.min(cpuTimeLimit + 5, 20);
+  const memoryLimitKb = Math.max(memoryLimitMb, 16) * 1024;
 
   const startedAt = Date.now();
   const result = await submitToJudge0({
@@ -165,26 +153,28 @@ export const runAgainstTestCase = async (
     stdin,
     cpu_time_limit: cpuTimeLimit,
     wall_time_limit: wallTimeLimit,
+    memory_limit: memoryLimitKb,
   });
   const runtimeMs = measuredRuntimeMs(result, startedAt);
   const memoryKb = result.memory ?? 0;
 
   if (result.status.id === STATUS_COMPILATION_ERROR) {
     const message = result.compile_output || result.message || "Compilation failed.";
-    return { stdout: "", stderr: message, exitCode: 1, timedOut: false, compileError: message, runtimeMs, memoryKb };
+    return { stdout: "", stderr: message, exitCode: 1, timedOut: false, memoryExceeded: false, compileError: message, runtimeMs, memoryKb };
   }
 
   if (result.status.id === STATUS_TIME_LIMIT_EXCEEDED) {
-    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: null, timedOut: true, compileError: null, runtimeMs, memoryKb };
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: null, timedOut: true, memoryExceeded: false, compileError: null, runtimeMs, memoryKb };
+  }
+
+  if (result.status.id === STATUS_MEMORY_LIMIT_EXCEEDED) {
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "Memory Limit Exceeded", exitCode: null, timedOut: false, memoryExceeded: true, compileError: null, runtimeMs, memoryKb };
   }
 
   if (RUNTIME_ERROR_STATUS_IDS.has(result.status.id)) {
     const message = result.stderr || result.message || result.status.description;
-    return { stdout: result.stdout ?? "", stderr: message, exitCode: 1, timedOut: false, compileError: null, runtimeMs, memoryKb };
+    return { stdout: result.stdout ?? "", stderr: message, exitCode: 1, timedOut: false, memoryExceeded: false, compileError: null, runtimeMs, memoryKb };
   }
 
-  // Accepted (3), or Wrong Answer (4) — unreachable since we never pass
-  // expected_output, kept only as a defensive fallback — both mean the
-  // program ran to completion with exit code 0.
-  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: 0, timedOut: false, compileError: null, runtimeMs, memoryKb };
+  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: 0, timedOut: false, memoryExceeded: false, compileError: null, runtimeMs, memoryKb };
 };

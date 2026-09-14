@@ -20,7 +20,7 @@
 // that corroborates (or flags disagreement with) the empirical
 // measurement from curveFit.ts, which is the primary evidence.
 
-export type JudgeLanguage = "python" | "cpp" | "javascript";
+export type JudgeLanguage = "python" | "cpp" | "javascript" | "typescript";
 
 export interface StructuralSignal {
   maxLoopDepth: number;
@@ -34,7 +34,7 @@ const stripCommentsAndStrings = (source: string, language: JudgeLanguage): strin
   let out = "";
   let i = 0;
   const n = source.length;
-  const isCLike = language === "cpp" || language === "javascript";
+  const isCLike = language === "cpp" || language === "javascript" || language === "typescript";
 
   while (i < n) {
     const ch = source[i];
