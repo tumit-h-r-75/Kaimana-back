@@ -40,10 +40,16 @@ interface IListUsersQuery {
   search?: string;
 }
 
+// Search text is matched literally and capped before it reaches $regex — same
+// reasoning as the helper of the same name in problem.service.ts.
+const MAX_SEARCH_LENGTH = 100;
+const toSearchRegex = (search: string) => search.trim().slice(0, MAX_SEARCH_LENGTH).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const listUsers = async ({ page = 1, limit = 20, search }: IListUsersQuery) => {
   const filter: FilterQuery<IUser> = {};
   if (search) {
-    filter.$or = [{ name: { $regex: search.trim(), $options: "i" } }, { email: { $regex: search.trim(), $options: "i" } }];
+    const pattern = toSearchRegex(search);
+    filter.$or = [{ name: { $regex: pattern, $options: "i" } }, { email: { $regex: pattern, $options: "i" } }];
   }
 
   const safeLimit = Math.min(Math.max(limit, 1), 100);

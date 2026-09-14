@@ -37,26 +37,34 @@ export const requireAuth = async (req: AuthenticatedRequest, _res: Response, nex
   const candidates = [bearer, req.cookies?.accessToken].filter((value): value is string => Boolean(value));
   if (candidates.length === 0) return next(new AppError("Authentication is required.", 401));
 
-  let payload: JwtPayload | undefined;
+  const payloads: JwtPayload[] = [];
   for (const candidate of candidates) {
     const verified = jwtUtils.verifyToken(candidate, config.jwtAccessSecret);
     if (verified.success && verified.data && typeof verified.data !== "string") {
-      payload = verified.data;
-      break;
+      payloads.push(verified.data);
     }
   }
-  if (!payload) return next(new AppError("Invalid or expired session.", 401));
+  if (payloads.length === 0) return next(new AppError("Invalid or expired session.", 401));
 
   try {
     // UserModel resolves through the loose `mongoose.models.User || model(...)`
     // union (see the comment on this same pattern in contest.service.ts), so
     // .lean() needs the explicit cast the rest of the codebase already uses
     // for this model (auth.service.ts, admin.service.ts).
-    const liveUser = (await UserModel.findById(payload._id).select("role status").lean()) as unknown as
-      | { role: "user" | "admin"; status: "active" | "blocked" }
+    const liveUser = (await UserModel.findById(payloads[0]._id).select("role status tokenVersion").lean()) as unknown as
+      | { role: "user" | "admin"; status: "active" | "blocked"; tokenVersion?: number }
       | null;
     if (!liveUser) return next(new AppError("Invalid or expired session.", 401));
     if (liveUser.status === "blocked") return next(new AppError("This account has been blocked.", 403));
+
+    // A token signed under an older tokenVersion has been revoked (e.g. by a
+    // password change, see auth.service.ts). Same shadowing concern as
+    // above: a revoked token in one slot mustn't hide a current one in the
+    // other, so accept whichever verified token for this user is current.
+    const payload = payloads.find(
+      (candidate) => String(candidate._id) === String(payloads[0]._id) && jwtUtils.tokenVersionMatches(candidate, liveUser),
+    );
+    if (!payload) return next(new AppError("Invalid or expired session.", 401));
 
     req.user = { ...payload, role: liveUser.role };
     return next();

@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import { config } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
+import { AppError } from "./utils/errors.js";
 import { authRouter } from "./modules/auth/auth.route.js";
 import { authController } from "./modules/auth/auth.controller.js";
 import { submissionRouter } from "./modules/submission/submission.route.js";
@@ -32,7 +33,7 @@ app.use(
                 return callback(null, true);
             }
 
-            return callback(new Error("Origin is not allowed by CORS"));
+            return callback(new AppError("Origin is not allowed by CORS.", 403));
         },
         credentials: true,
     })

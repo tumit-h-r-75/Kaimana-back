@@ -3,10 +3,10 @@ import path from "node:path";
 import { z } from "zod";
 
 // Vercel provides environment variables through process.env. Locally we use
-// the ignored .env.local file so development secrets never enter Git.
-// Load the developer-local file when present; hosted environments continue to
-// use injected process.env values. `override: false` prevents local defaults
-// from replacing deployment secrets.
+// ignored .env / .env.local files so development secrets never enter Git.
+// `.env` never replaces a variable that is already set (hosted deployments
+// keep their injected values); `.env.local` then overrides `.env` for local
+// development. Neither file is deployed.
 dotenv.config({ path: path.resolve(process.cwd(), ".env"), override: false });
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local"), override: true });
 

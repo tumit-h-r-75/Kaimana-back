@@ -1,8 +1,7 @@
 import type { Response } from "express";
 import httpStatus from "http-status";
 import { Types } from "mongoose";
-import { executeCode } from "../../integrations/judge0/judge0.service.js";
-import type { JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
+import { isJudgeLanguage } from "../../integrations/judge0/judge0.service.js";
 import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
 import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
@@ -12,51 +11,88 @@ import { gemsForDifficulty } from "../../utils/gems.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { UserModel } from "../../models/User.model.js";
 import { HintUnlockModel, type IHintUnlock } from "../../models/HintUnlock.model.js";
+import { contestService } from "../contest/contest.service.js";
 import { problemService } from "../problem/problem.service.js";
 import { testCaseService } from "../problem/testcase.service.js";
 import { judgeSubmission } from "./judge.service.js";
+import { runService } from "./run.service.js";
 
+const MAX_CODE_LENGTH = 20_000;
+const MAX_CUSTOM_INPUT_LENGTH = 5_000;
+const UNSUPPORTED_LANGUAGE_MESSAGE = "Unsupported language. Use python, cpp, javascript, or typescript.";
+
+// Runs aren't stored, so this limit can only be per serverless instance —
+// best effort, not a guarantee.
+const RUNS_PER_MINUTE = 10;
 const recentExecutions = new Map<string, number[]>();
+
+// POST /api/submissions/execute — the workspace's "Run" button: runs the code
+// on the problem's sample tests (or custom stdin) and reports each result.
 const execute = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
   const now = Date.now();
   const requests = (recentExecutions.get(userId) ?? []).filter((time) => now - time < 60_000);
-  if (requests.length >= 10) return res.status(429).json({ success: false, message: "Execution limit reached. Try again in a minute." });
+  if (requests.length >= RUNS_PER_MINUTE) throw new AppError("Run limit reached. Try again in a minute.", 429);
   recentExecutions.set(userId, [...requests, now]);
-  const result = await executeCode(req.body);
-  sendResponse(res, { success: true, statusCode: 200, message: "Code executed", data: result });
+
+  const { language, source, stdin, problemId } = (req.body ?? {}) as Record<string, unknown>;
+  if (!isJudgeLanguage(language)) throw new AppError(UNSUPPORTED_LANGUAGE_MESSAGE, 400);
+  // A missing or non-string `source` used to reach `source.trim()` and 500.
+  if (typeof source !== "string" || !source.trim()) throw new AppError("Write some code before running it.", 400);
+  if (source.length > MAX_CODE_LENGTH) throw new AppError("Code is outside the allowed size limit.", 400);
+  if (stdin !== undefined && (typeof stdin !== "string" || stdin.length > MAX_CUSTOM_INPUT_LENGTH)) {
+    throw new AppError("Custom input must be text of at most 5,000 characters.", 400);
+  }
+  if (problemId !== undefined && (typeof problemId !== "string" || !Types.ObjectId.isValid(problemId))) {
+    throw new AppError("problemId is not a valid id.", 400);
+  }
+
+  const result = await runService.runCode({
+    language,
+    source,
+    stdin: stdin as string | undefined,
+    problemId: problemId as string | undefined,
+    canSeeUnpublished: req.user?.role === "admin",
+  });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Code executed", data: result });
 });
 
-const judgeLanguages = new Set<JudgeLanguage>(["python", "cpp", "javascript"]);
+// Every submission fans out to one Judge0 run per test case on the shared
+// public instance, so a script submitting in a loop could exhaust it for
+// everyone. Counted from stored submissions, the limit holds across
+// serverless instances and cold starts.
+const SUBMISSIONS_PER_MINUTE = 6;
 
 // POST /api/submissions — the system-gate endpoint: create a PENDING
 // submission, judge it synchronously against Judge0 (no queue/worker
 // infrastructure on this Vercel deployment), then return the final verdict.
 const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const { problemId, code, language, contestId } = req.body as {
-    problemId?: string;
-    code?: string;
-    language?: string;
-    contestId?: string;
-  };
+  const { problemId, code, language, contestId } = (req.body ?? {}) as Record<string, unknown>;
 
-  if (!problemId || !code?.trim() || !language) throw new AppError("problemId, code, and language are required.", 400);
+  if (typeof problemId !== "string" || typeof code !== "string" || !code.trim() || typeof language !== "string") {
+    throw new AppError("problemId, code, and language are required.", 400);
+  }
   if (!Types.ObjectId.isValid(problemId)) throw new AppError("problemId is not a valid id.", 400);
-  if (contestId && !Types.ObjectId.isValid(contestId)) throw new AppError("contestId is not a valid id.", 400);
-  if (!judgeLanguages.has(language as JudgeLanguage)) throw new AppError("Unsupported language. Use python, cpp, or javascript.", 400);
-  if (code.length > 20_000) throw new AppError("Code is outside the allowed size limit.", 400);
+  if (contestId !== undefined && contestId !== null && typeof contestId !== "string") throw new AppError("contestId is not a valid id.", 400);
+  if (!isJudgeLanguage(language)) throw new AppError(UNSUPPORTED_LANGUAGE_MESSAGE, 400);
+  if (code.length > MAX_CODE_LENGTH) throw new AppError("Code is outside the allowed size limit.", 400);
 
   const userId = String(req.user?._id);
+
+  const recentSubmissions = await SubmissionModel.countDocuments({ userId, createdAt: { $gte: new Date(Date.now() - 60_000) } });
+  if (recentSubmissions >= SUBMISSIONS_PER_MINUTE) throw new AppError("Too many submissions. Wait a minute before submitting again.", 429);
 
   // Pre-flight check: verify problem exists and has reviewed test cases BEFORE creating a DB record.
   // Fixes Bug #3: prevents unconfigured problems from saving fake RUNTIME_ERROR submissions.
   const problem = await problemService.getProblemForJudging(problemId);
+  if (!problem.isPublished && req.user?.role !== "admin") throw new AppError("Problem not found.", 404);
   await testCaseService.getTestCasesForJudging(problemId);
+  const contest = contestId ? await contestService.getSubmissionContext(contestId, userId, problemId) : null;
 
   const submission = await SubmissionModel.create({
     userId,
     problemId,
-    contestId: contestId || undefined,
+    contestId: contest?.contestId,
     language,
     code,
     verdict: "RUNNING",
@@ -68,8 +104,7 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   let gemsAwarded = 0;
 
   try {
-    const problem = await problemService.getProblemForJudging(problemId);
-    const result = await judgeSubmission({ problemId, language: language as JudgeLanguage, code });
+    const result = await judgeSubmission({ problemId, language, code });
     // Partial credit: score is proportional to how many test cases passed,
     // not gated to a full ACCEPTED verdict. judge.service.ts stops at the
     // first failing test, so `passedTests` already holds the count that
@@ -122,21 +157,14 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
       }
     }
   } catch (error) {
-    // An infra failure (Judge0's free demo unavailable/overloaded/timed out
-    // — surfaced as a 5xx AppError, see judge0.service.ts) is not the same
-    // thing as the user's code actually being broken. Recording it as a
-    // RUNTIME_ERROR with score 0 silently lied about why the submission
-    // failed and permanently penalized a correct solution for a transient
-    // outage. Delete the placeholder and return a clean, retryable error
-    // instead — the frontend already surfaces submit() failures via
-    // setSubmitError without creating a fake submission record.
-    const isInfraFailure = error instanceof AppError && error.statusCode >= 500;
-    if (isInfraFailure) {
-      await SubmissionModel.findByIdAndDelete(submission._id);
-      throw error;
-    }
-    submission.set({ verdict: "RUNTIME_ERROR", errorMessage: (error as Error).message?.slice(0, 500) ?? "Judging failed." });
-    await submission.save();
+    // Judging never reached a verdict: Judge0 was unavailable, rate-limited
+    // or too slow (all surfaced as 503 by judge0.service.ts), or something
+    // unexpected broke. Neither says anything about the learner's code, so
+    // don't keep a RUNTIME_ERROR record that would permanently cost them
+    // score — the problem and its test cases were already validated above.
+    // Delete the placeholder and return a clean, retryable error instead.
+    await SubmissionModel.findByIdAndDelete(submission._id);
+    throw error;
   }
 
   // gemsAwarded rides along on the response only (not persisted on the
@@ -151,6 +179,7 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
 });
 
 const getById = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  if (!Types.ObjectId.isValid(String(req.params.id))) throw new AppError("Submission not found.", 404);
   const submission = await SubmissionModel.findById(req.params.id);
   if (!submission) throw new AppError("Submission not found.", 404);
   if (String(submission.userId) !== String(req.user?._id) && req.user?.role !== "admin") {
@@ -162,7 +191,10 @@ const getById = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
 const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { problemId, page = "1", limit = "20" } = req.query as Record<string, string>;
   const filter: Record<string, unknown> = { userId: req.user?._id };
-  if (problemId) filter.problemId = problemId;
+  if (problemId) {
+    if (!Types.ObjectId.isValid(String(problemId))) throw new AppError("problemId is not a valid id.", 400);
+    filter.problemId = problemId;
+  }
 
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const safePage = Math.max(Number(page) || 1, 1);

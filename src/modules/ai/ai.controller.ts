@@ -51,7 +51,9 @@ const getHint = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { problemId, level, code } = req.body as { problemId?: string; level?: number; code?: string };
   if (!problemId) throw new AppError("problemId is required.", 400);
 
-  const result = await hintService.getHint({ userId, problemId, level: level ?? 1, code });
+  // role comes from requireAuth's live user lookup — admins may request
+  // hints on unpublished drafts, everyone else gets a 404 for them.
+  const result = await hintService.getHint({ userId, problemId, level: level ?? 1, code, role: req.user?.role });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Hint generated", data: result });
 });
 

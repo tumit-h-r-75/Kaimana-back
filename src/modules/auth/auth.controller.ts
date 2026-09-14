@@ -67,7 +67,8 @@ const register = catchAsync(async (req, res) => {
     sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Account created", data: result });
 });
 const login = catchAsync(async (req, res) => {
-    const result = await authService.loginWithPassword(req.body);
+    // Express 5 leaves req.body undefined when no body was parsed at all.
+    const result = await authService.loginWithPassword(req.body ?? {});
     setSessionCookies(res, result.accessToken, result.refreshToken);
     sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Logged in successfully", data: result });
 });
@@ -145,13 +146,17 @@ const updateProfile = catchAsync(async (req: AuthenticatedRequest, res) => {
     // Same optional-file pattern as register: req.file only exists when the
     // request was multipart/form-data with an "avatar" field.
     const avatarBuffer = (req as AuthenticatedRequest & { file?: { buffer: Buffer } }).file?.buffer;
-    const user = await authService.updateProfile({ userId: String(req.user?._id), name: req.body.name, avatarBuffer });
+    const user = await authService.updateProfile({ userId: String(req.user?._id), name: req.body?.name, avatarBuffer });
     sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Profile updated", data: user });
 });
 
 const changePassword = catchAsync(async (req: AuthenticatedRequest, res) => {
-    await authService.changePassword({ userId: String(req.user?._id), currentPassword: req.body.currentPassword, newPassword: req.body.newPassword });
-    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Password updated", data: null });
+    const tokens = await authService.changePassword({ userId: String(req.user?._id), currentPassword: req.body?.currentPassword, newPassword: req.body?.newPassword });
+    // The password change bumped tokenVersion, which revoked every existing
+    // session — including this one. Replace it the same way login does, and
+    // also return the pair so the frontend can update its stored Bearer tokens.
+    setSessionCookies(res, tokens.accessToken, tokens.refreshToken);
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Password updated", data: tokens });
 });
 
 export const authController = {

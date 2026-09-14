@@ -159,6 +159,12 @@ export const getMyAnalytics = async (userId: string): Promise<MyAnalytics> => {
   let currentStreakDays = 0;
   const cursor = new Date(now);
   cursor.setUTCHours(0, 0, 0, 0);
+  // A streak that ran through yesterday is still alive until today (UTC)
+  // ends — don't report (or snapshot) 0 just because today's first
+  // submission hasn't happened yet.
+  if (!submissionDays.has(toDateKey(cursor))) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
   while (submissionDays.has(toDateKey(cursor))) {
     currentStreakDays += 1;
     cursor.setUTCDate(cursor.getUTCDate() - 1);

@@ -4,6 +4,7 @@ import { FilterQuery, Types } from "mongoose";
 import { IProblem, ProblemModel } from "../../models/Problem.model.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { TestCaseModel } from "../../models/TestCase.model.js";
+import { HintUnlockModel } from "../../models/HintUnlock.model.js";
 import { AppError } from "../../utils/errors.js";
 
 // mongoose.models.Problem || model<IProblem>(...) (see Problem.model.ts) widens
@@ -11,6 +12,12 @@ import { AppError } from "../../utils/errors.js";
 // ambiguous array-or-single type. Casting through this alias keeps call sites
 // readable instead of repeating `as unknown as ...` everywhere.
 type LeanProblem = IProblem & { _id: Types.ObjectId };
+
+// Search text goes into a $regex, so it's matched literally: an unescaped
+// "(" is an invalid pattern (a 500 on a public endpoint), and arbitrary or
+// very long patterns are a cheap way to make the database do heavy work.
+const MAX_SEARCH_LENGTH = 100;
+const toSearchRegex = (search: string) => search.trim().slice(0, MAX_SEARCH_LENGTH).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 interface IListProblemsQuery {
   difficulty?: string;
@@ -25,7 +32,7 @@ const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, us
   const filter: FilterQuery<IProblem> = { isPublished: true };
   if (difficulty) filter.difficulty = difficulty.toUpperCase();
   if (tags) filter.tags = { $in: tags.split(",").map((tag) => tag.trim()).filter(Boolean) };
-  if (search) filter.title = { $regex: search.trim(), $options: "i" };
+  if (search) filter.title = { $regex: toSearchRegex(search), $options: "i" };
 
   const safeLimit = Math.min(Math.max(limit, 1), 100);
   const safePage = Math.max(page, 1);
@@ -74,6 +81,11 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
 
   let mySubmissionsCount = 0;
   let myBestVerdict: string | null = null;
+  // The learner's hint progress on this problem (see hint.service.ts), so the
+  // workspace can show which tiers are already paid for and the penalty so
+  // far. Both stay 0 for anonymous requests and for users with no hints yet.
+  let myHintTier = 0;
+  let myHintPenaltyPercent = 0;
   if (userId) {
     mySubmissionsCount = await SubmissionModel.countDocuments({ userId, problemId: problem._id });
     const bestAccepted = await SubmissionModel.exists({ userId, problemId: problem._id, verdict: "ACCEPTED" });
@@ -83,6 +95,11 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
       const latest = (await SubmissionModel.findOne({ userId, problemId: problem._id }).sort({ createdAt: -1 }).select("verdict").lean()) as unknown as { verdict: string } | null;
       myBestVerdict = latest?.verdict ?? null;
     }
+    const hintUnlock = (await HintUnlockModel.findOne({ userId, problemId: problem._id }).select("unlockedTier penaltyPercent").lean()) as unknown as
+      | { unlockedTier?: number; penaltyPercent?: number }
+      | null;
+    myHintTier = hintUnlock?.unlockedTier ?? 0;
+    myHintPenaltyPercent = hintUnlock?.penaltyPercent ?? 0;
   }
 
   // The seed script only writes sample cases to the TestCase collection, never
@@ -117,6 +134,8 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
     starterCode: problem.starterCode,
     mySubmissionsCount,
     myBestVerdict,
+    myHintTier,
+    myHintPenaltyPercent,
   };
 };
 
@@ -144,9 +163,16 @@ const createProblem = async (payload: ICreateProblemInput) => {
   return ProblemModel.create({ ...payload, slug: payload.slug.toLowerCase() });
 };
 
-const updateProblem = async (problemId: string, payload: Partial<ICreateProblemInput>) => {
+// `referenceSolution: null` is how the admin edit form asks to clear a saved
+// solution, so it becomes an explicit $unset that removes the stored object.
+const updateProblem = async (
+  problemId: string,
+  payload: Partial<Omit<ICreateProblemInput, "referenceSolution">> & { referenceSolution?: IProblem["referenceSolution"] | null },
+) => {
   if (!Types.ObjectId.isValid(problemId)) throw new AppError("Invalid problem id.", 400);
-  const problem = await ProblemModel.findByIdAndUpdate(problemId, payload, { new: true });
+  const { referenceSolution, ...rest } = payload;
+  const update = referenceSolution === null ? { ...rest, $unset: { referenceSolution: 1 } } : payload;
+  const problem = await ProblemModel.findByIdAndUpdate(problemId, update, { new: true });
   if (!problem) throw new AppError("Problem not found.", 404);
   return problem;
 };
@@ -169,7 +195,7 @@ interface IListAllProblemsQuery {
 
 const listAllForAdmin = async ({ page = 1, limit = 50, search }: IListAllProblemsQuery) => {
   const filter: FilterQuery<IProblem> = {};
-  if (search) filter.title = { $regex: search.trim(), $options: "i" };
+  if (search) filter.title = { $regex: toSearchRegex(search), $options: "i" };
 
   const safeLimit = Math.min(Math.max(limit, 1), 200);
   const safePage = Math.max(page, 1);

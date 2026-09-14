@@ -1,6 +1,7 @@
 // Global Express middleware for handling and formatting API errors.
 
 import { NextFunction, Request, Response } from "express";
+import mongoose from "mongoose";
 import { MulterError } from "multer";
 import { AppError } from "../utils/errors.js";
 import { config } from "../config/env.js";
@@ -9,6 +10,8 @@ const MULTER_MESSAGES: Record<string, string> = {
     LIMIT_FILE_SIZE: "That image is too large — please use one under 4 MB.",
     LIMIT_UNEXPECTED_FILE: "Please upload a PNG, JPEG, WEBP, or GIF image.",
 };
+
+const isDuplicateKeyError = (err: unknown) => typeof err === "object" && err !== null && (err as { code?: unknown }).code === 11000;
 
 export const errorHandler = (err: unknown, req: Request, res: Response, next: NextFunction) => {
     let statusCode = 500;
@@ -22,6 +25,17 @@ export const errorHandler = (err: unknown, req: Request, res: Response, next: Ne
         // non-image mimetype rejected by its fileFilter).
         statusCode = 400;
         message = MULTER_MESSAGES[err.code] ?? "Could not process the uploaded file.";
+    } else if (err instanceof mongoose.Error.CastError) {
+        // A malformed id or value reaching a query (e.g. GET
+        // /api/submissions/abc) is a bad request, not a server crash.
+        statusCode = 400;
+        message = err.kind === "ObjectId" ? "Invalid id." : `Invalid value for ${err.path}.`;
+    } else if (err instanceof mongoose.Error.ValidationError) {
+        statusCode = 400;
+        message = Object.values(err.errors).map((fieldError) => fieldError.message).join(" ") || "Invalid data.";
+    } else if (isDuplicateKeyError(err)) {
+        statusCode = 409;
+        message = "That record already exists.";
     } else if (err instanceof Error) {
         message = config.nodeEnv === "development" ? err.message : message;
     }
