@@ -85,6 +85,21 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
     }
   }
 
+  // The seed script only writes sample cases to the TestCase collection, never
+  // to the embedded `sampleTests`, so every seeded problem came back with
+  // `sampleTests: []` — the workspace showed no samples and its Run button
+  // executed the learner's code against empty stdin (EOFError / undefined
+  // input in every language). Fall back to the reviewed sample test cases
+  // whenever the embedded list is empty.
+  let sampleTests = problem.sampleTests ?? [];
+  if (!sampleTests.length) {
+    const sampleCases = (await TestCaseModel.find({ problemId: problem._id, isSample: true, reviewed: { $ne: false } })
+      .sort({ order: 1, createdAt: 1 })
+      .select("input expectedOutput")
+      .lean()) as unknown as { input: string; expectedOutput: string }[];
+    sampleTests = sampleCases.map(({ input, expectedOutput }) => ({ input, expectedOutput }));
+  }
+
   return {
     id: String(problem._id),
     slug: problem.slug,
@@ -98,7 +113,7 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
     timeLimitMs: problem.timeLimitMs,
     memoryLimitMb: problem.memoryLimitMb,
     basePoints: problem.basePoints,
-    sampleTests: problem.sampleTests,
+    sampleTests,
     starterCode: problem.starterCode,
     mySubmissionsCount,
     myBestVerdict,
