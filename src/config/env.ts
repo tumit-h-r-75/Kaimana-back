@@ -57,6 +57,10 @@ export const env = envSchema.parse(process.env);
 
 export const config = {
   nodeEnv: env.NODE_ENV,
+  // Vercel sets VERCEL=1 in every deployment. NODE_ENV defaults to
+  // "development" when unset, so this is the reliable "running for real
+  // users" signal — see error.middleware.ts.
+  isDeployed: Boolean(process.env.VERCEL),
   port: env.PORT,
   mongodbUri: env.MONGODB_URI,
   googleClientId: env.GOOGLE_CLIENT_ID,

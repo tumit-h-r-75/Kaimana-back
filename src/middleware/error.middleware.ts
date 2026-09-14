@@ -13,6 +13,11 @@ const MULTER_MESSAGES: Record<string, string> = {
 
 const isDuplicateKeyError = (err: unknown) => typeof err === "object" && err !== null && (err as { code?: unknown }).code === 11000;
 
+// Raw messages and stack traces are for local debugging only. The deployed API
+// was running with NODE_ENV unset/"development", so every error response
+// shipped a stack trace with server file paths — never do that on Vercel.
+const showErrorDetails = config.nodeEnv === "development" && !config.isDeployed;
+
 export const errorHandler = (err: unknown, req: Request, res: Response, next: NextFunction) => {
     let statusCode = 500;
     let message = "Internal Server Error";
@@ -37,10 +42,10 @@ export const errorHandler = (err: unknown, req: Request, res: Response, next: Ne
         statusCode = 409;
         message = "That record already exists.";
     } else if (err instanceof Error) {
-        message = config.nodeEnv === "development" ? err.message : message;
+        message = showErrorDetails ? err.message : message;
     }
 
-    if (config.nodeEnv === "development") {
+    if (config.nodeEnv === "development" || statusCode >= 500) {
         console.log(err);
     }
 
@@ -48,7 +53,7 @@ export const errorHandler = (err: unknown, req: Request, res: Response, next: Ne
         success: false,
         statusCode,
         message,
-        ...(config.nodeEnv === "development" && err instanceof Error
+        ...(showErrorDetails && err instanceof Error
             ? { stack: err.stack }
             : {}
         )
