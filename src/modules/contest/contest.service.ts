@@ -319,8 +319,11 @@ const getScoreboard = async (identifier: string) => {
 
   // Only submissions made during the contest window, for the contest's own
   // problems, count — so the final standings can't change after it ends.
+  // The window is checked against submittedAt (when the user pressed Submit),
+  // not createdAt: the record is only saved once judging finishes, so its
+  // createdAt lands a few seconds late and would drop last-second submissions.
   const rows = (await SubmissionModel.aggregate([
-    { $match: { contestId: contest._id, problemId: { $in: problemIds }, createdAt: { $gte: contest.startTime, $lte: contest.endTime } } },
+    { $match: { contestId: contest._id, problemId: { $in: problemIds }, submittedAt: { $gte: contest.startTime, $lte: contest.endTime } } },
     // Same split as the global leaderboard (see leaderboard.service.ts):
     // bestScore can include partial credit, so "solved" is tracked
     // separately off an actual ACCEPTED verdict rather than off score>0.
