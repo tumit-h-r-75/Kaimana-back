@@ -30,6 +30,10 @@ export const errorHandler = (err: unknown, req: Request, res: Response, next: Ne
         // non-image mimetype rejected by its fileFilter).
         statusCode = 400;
         message = MULTER_MESSAGES[err.code] ?? "Could not process the uploaded file.";
+    } else if (typeof err === "object" && err !== null && (err as { type?: unknown }).type === "entity.parse.failed") {
+        // express.json() rejects a malformed JSON body before any route runs.
+        statusCode = 400;
+        message = "The request body is not valid JSON.";
     } else if (err instanceof mongoose.Error.CastError) {
         // A malformed id or value reaching a query (e.g. GET
         // /api/submissions/abc) is a bad request, not a server crash.
