@@ -1,11 +1,17 @@
-// Service for problem proposals. A learner with at least PROPOSAL_MIN_GEMS
-// gems can propose a new problem for the library — the same fields as the
-// admin "Create problem" form, except the slug, points and visibility, which
-// the reviewing admin decides. Until a proposal is accepted its author can
-// edit or delete it; editing a rejected proposal sends it back for review.
-// Accepting one creates the problem and its test cases in a transaction.
+// Service for problem proposals. A learner proposes a new problem for the
+// library — the same fields as the admin "Create problem" form, except the
+// slug, points and visibility, which the reviewing admin decides.
+//
+// Gems: sending a proposal for review costs PROPOSAL_COST_GEMS. A rejected
+// proposal refunds half, an accepted one keeps the full cost, and deleting a
+// proposal before it's reviewed refunds it all. Editing a rejected proposal
+// sends it back for review, which costs the fee again. Every gem change is
+// written in the same transaction as the proposal change it belongs to.
+//
+// Until a proposal is accepted its author can edit or delete it. Accepting one
+// creates the problem and its test cases in a transaction.
 
-import mongoose, { FilterQuery, Types } from "mongoose";
+import mongoose, { ClientSession, FilterQuery, Types } from "mongoose";
 import {
   ProblemProposalModel,
   type IProblemProposal,
@@ -16,7 +22,7 @@ import {
 import { ProblemModel } from "../../models/Problem.model.js";
 import { TestCaseModel } from "../../models/TestCase.model.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
-import { PROPOSAL_MIN_GEMS } from "../../utils/gems.js";
+import { PROPOSAL_COST_GEMS, PROPOSAL_REJECT_REFUND_GEMS } from "../../utils/gems.js";
 import { AppError } from "../../utils/errors.js";
 
 // Same loose `mongoose.models.X || model(...)` union as every other model, so
@@ -62,6 +68,10 @@ const PENDING_LIMIT_MESSAGE = `You already have ${MAX_PENDING_PROPOSALS} proposa
 const ALREADY_REVIEWED_MESSAGE = "This proposal has already been reviewed.";
 const SLUG_TAKEN_MESSAGE = "A problem with this slug already exists.";
 const NOT_FOUND_MESSAGE = "Proposal not found.";
+const STALE_EDIT_MESSAGE = "This proposal was just reviewed. Reload to see the decision.";
+
+const notEnoughGemsMessage = (gems: number) =>
+  `Sending a proposal costs ${PROPOSAL_COST_GEMS} gems — you have ${gems}. Solve more problems to earn gems.`;
 
 export interface LinkedProblemDto {
   id: string;
@@ -84,6 +94,9 @@ export interface ProposalSummaryDto {
   createdAt: string;
   updatedAt: string;
   problem: LinkedProblemDto | null;
+  // Gems this proposal has cost its author in total, and how many came back.
+  gemsSpent: number;
+  gemsRefunded: number;
   // Only on the admin endpoints.
   user?: { id: string; name: string; email: string; role: IUser["role"] };
 }
@@ -265,6 +278,8 @@ const toSummaryDto = (proposal: LeanProposal, problem?: LinkedProblem | null, us
     createdAt: new Date(proposal.createdAt).toISOString(),
     updatedAt: new Date(proposal.updatedAt).toISOString(),
     problem: problem ? { id: String(problem._id), slug: problem.slug, isPublished: problem.isPublished } : null,
+    gemsSpent: proposal.gemsSpent ?? 0,
+    gemsRefunded: proposal.gemsRefunded ?? 0,
   };
   if (user) dto.user = { id: String(user._id), name: user.name, email: user.email, role: user.role };
   return dto;
@@ -307,6 +322,43 @@ const loadLinkedProblems = async (proposals: LeanProposal[]) => {
 const loadProposer = async (userId: Types.ObjectId) =>
   (await UserModel.findById(userId).select("name email role").lean()) as unknown as LeanProposer | null;
 
+// Runs `work` in a MongoDB transaction and returns its result. withTransaction
+// can retry `work` after a transient error, so it must only write through the
+// session.
+const inTransaction = async <T>(work: (session: ClientSession) => Promise<T>) => {
+  const session = await mongoose.startSession();
+  try {
+    let result: T | undefined;
+    await session.withTransaction(async () => {
+      result = await work(session);
+    });
+    return result as T;
+  } finally {
+    await session.endSession();
+  }
+};
+
+// Takes the proposal cost only if the balance covers it, so two proposals sent
+// at the same moment can never push the balance below zero.
+const chargeProposalCost = async (userId: string, session: ClientSession) => {
+  const charged = await UserModel.findOneAndUpdate(
+    { _id: userId, gems: { $gte: PROPOSAL_COST_GEMS } },
+    { $inc: { gems: -PROPOSAL_COST_GEMS } },
+    { session },
+  )
+    .select("_id")
+    .lean();
+  if (charged) return;
+  const user = (await UserModel.findById(userId).select("gems").session(session).lean()) as unknown as { gems?: number } | null;
+  if (!user) throw new AppError("User not found.", 404);
+  throw new AppError(notEnoughGemsMessage(user.gems ?? 0), 403);
+};
+
+// An author whose account has since been deleted simply gets nothing back.
+const refundGems = async (userId: Types.ObjectId, amount: number, session: ClientSession) => {
+  if (amount > 0) await UserModel.updateOne({ _id: userId }, { $inc: { gems: amount } }, { session });
+};
+
 // Lowercase ASCII words joined by hyphens; titles with no such characters
 // (e.g. written in another script) fall back to "problem".
 const slugify = (title: string) =>
@@ -340,10 +392,11 @@ const getMyProposals = async (userId: string) => {
   const problems = await loadLinkedProblems(proposals);
   return {
     gems,
-    requiredGems: PROPOSAL_MIN_GEMS,
+    cost: PROPOSAL_COST_GEMS,
+    rejectRefund: PROPOSAL_REJECT_REFUND_GEMS,
     maxPending: MAX_PENDING_PROPOSALS,
     pendingCount,
-    canPropose: gems >= PROPOSAL_MIN_GEMS && pendingCount < MAX_PENDING_PROPOSALS,
+    canPropose: gems >= PROPOSAL_COST_GEMS && pendingCount < MAX_PENDING_PROPOSALS,
     items: proposals.map((proposal) => toSummaryDto(proposal, problems.get(String(proposal.problemId)))),
   };
 };
@@ -351,17 +404,33 @@ const getMyProposals = async (userId: string) => {
 const createProposal = async (userId: string, payload: unknown) => {
   const user = (await UserModel.findById(userId).select("gems").lean()) as unknown as { gems?: number } | null;
   if (!user) throw new AppError("User not found.", 404);
-  const gems = user.gems ?? 0;
-  if (gems < PROPOSAL_MIN_GEMS) {
-    throw new AppError(`You need at least ${PROPOSAL_MIN_GEMS} gems to propose a problem — you have ${gems}. Solve more problems to earn gems.`, 403);
-  }
+  if ((user.gems ?? 0) < PROPOSAL_COST_GEMS) throw new AppError(notEnoughGemsMessage(user.gems ?? 0), 403);
   if ((await ProblemProposalModel.countDocuments({ userId, status: "pending" })) >= MAX_PENDING_PROPOSALS) {
     throw new AppError(PENDING_LIMIT_MESSAGE, 409);
   }
 
   const input = parseProposalInput(payload);
-  const created = await ProblemProposalModel.create({ userId, ...input, status: "pending", submittedAt: new Date() });
-  return toDetailDto(created.toObject() as unknown as LeanProposal);
+  // The charge and the proposal are written together: a failure never takes
+  // gems without saving the proposal, or saves it without taking them.
+  const created = await inTransaction(async (session) => {
+    await chargeProposalCost(userId, session);
+    const [proposal] = (await ProblemProposalModel.create(
+      [
+        {
+          userId,
+          ...input,
+          status: "pending",
+          submittedAt: new Date(),
+          gemsSpent: PROPOSAL_COST_GEMS,
+          gemsRefunded: 0,
+          pendingCharge: PROPOSAL_COST_GEMS,
+        },
+      ],
+      { session },
+    )) as unknown as { toObject: () => unknown }[];
+    return proposal.toObject() as unknown as LeanProposal;
+  });
+  return toDetailDto(created);
 };
 
 // The author and admins can read a proposal; anyone else gets the same 404 as
@@ -387,19 +456,27 @@ const updateProposal = async (proposalId: string, userId: string, payload: unkno
   }
 
   const { referenceSolution, ...fields } = parseProposalInput(payload);
-  // Editing a rejected proposal sends it back to the review queue.
+  // Editing a rejected proposal sends it back to the review queue. That's a
+  // new submission, so it costs the proposal fee again.
   const resubmit = current.status === "rejected";
-  if (resubmit && (await ProblemProposalModel.countDocuments({ userId, status: "pending" })) >= MAX_PENDING_PROPOSALS) {
-    throw new AppError(PENDING_LIMIT_MESSAGE, 409);
+  if (resubmit) {
+    if ((await ProblemProposalModel.countDocuments({ userId, status: "pending" })) >= MAX_PENDING_PROPOSALS) {
+      throw new AppError(PENDING_LIMIT_MESSAGE, 409);
+    }
+    const user = (await UserModel.findById(userId).select("gems").lean()) as unknown as { gems?: number } | null;
+    if ((user?.gems ?? 0) < PROPOSAL_COST_GEMS) throw new AppError(notEnoughGemsMessage(user?.gems ?? 0), 403);
   }
 
   const $set: Record<string, unknown> = { ...fields };
   const $unset: Record<string, 1> = {};
+  const $inc: Record<string, number> = {};
   if (referenceSolution) $set.referenceSolution = referenceSolution;
   else $unset.referenceSolution = 1;
   if (resubmit) {
     $set.status = "pending";
     $set.submittedAt = new Date();
+    $set.pendingCharge = PROPOSAL_COST_GEMS;
+    $inc.gemsSpent = PROPOSAL_COST_GEMS;
     $unset.reviewNote = 1;
     $unset.reviewedBy = 1;
     $unset.reviewedAt = 1;
@@ -407,12 +484,23 @@ const updateProposal = async (proposalId: string, userId: string, payload: unkno
 
   // Conditioned on the status read above, so an admin decision made in the
   // meantime is never overwritten by a stale edit.
-  const updated = (await ProblemProposalModel.findOneAndUpdate(
-    { _id: proposalId, userId, status: current.status },
-    { $set, $unset },
-    { new: true, runValidators: true },
-  ).lean()) as unknown as LeanProposal | null;
-  if (!updated) throw new AppError("This proposal was just reviewed. Reload to see the decision.", 409);
+  const save = async (session?: ClientSession) =>
+    (await ProblemProposalModel.findOneAndUpdate(
+      { _id: proposalId, userId, status: current.status },
+      { $set, $unset, ...(resubmit ? { $inc } : {}) },
+      { new: true, runValidators: true, session },
+    ).lean()) as unknown as LeanProposal | null;
+
+  const updated = resubmit
+    ? await inTransaction(async (session) => {
+        await chargeProposalCost(userId, session);
+        const saved = await save(session);
+        // Throwing inside the transaction also rolls the charge back.
+        if (!saved) throw new AppError(STALE_EDIT_MESSAGE, 409);
+        return saved;
+      })
+    : await save();
+  if (!updated) throw new AppError(STALE_EDIT_MESSAGE, 409);
   return toDetailDto(updated);
 };
 
@@ -426,9 +514,19 @@ const deleteProposal = async (proposalId: string, userId: string) => {
     throw new AppError("An accepted proposal can't be deleted — it's part of the problem library now.", 409);
   }
 
-  const result = await ProblemProposalModel.deleteOne({ _id: proposalId, userId, status: { $in: EDITABLE_STATUSES } });
-  if (result.deletedCount === 0) throw new AppError("This proposal was just reviewed. Reload to see the decision.", 409);
-  return { deleted: true };
+  const gemsRefunded = await inTransaction(async (session) => {
+    const removed = (await ProblemProposalModel.findOneAndDelete(
+      { _id: proposalId, userId, status: { $in: EDITABLE_STATUSES } },
+      { session },
+    ).lean()) as unknown as LeanProposal | null;
+    if (!removed) throw new AppError(STALE_EDIT_MESSAGE, 409);
+    // Withdrawing a proposal nobody has reviewed yet returns what it cost. A
+    // rejected one already got its half back when it was rejected.
+    const refund = removed.status === "pending" ? (removed.pendingCharge ?? 0) : 0;
+    await refundGems(removed.userId, refund, session);
+    return refund;
+  });
+  return { deleted: true, gemsRefunded };
 };
 
 interface IListProposalsQuery {
@@ -505,14 +603,24 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
   const reviewFields = { reviewedBy: reviewerId, reviewedAt: new Date(), ...(note ? { reviewNote: note } : {}) };
 
   if (action === "reject") {
-    // Conditioned on the proposal still being pending, so two admins
-    // reviewing it at once can't both win.
-    const rejected = (await ProblemProposalModel.findOneAndUpdate(
-      { _id: proposal._id, status: "pending" },
-      { $set: { status: "rejected", ...reviewFields } },
-      { new: true },
-    ).lean()) as unknown as LeanProposal | null;
-    if (!rejected) throw new AppError(ALREADY_REVIEWED_MESSAGE, 409);
+    await inTransaction(async (session) => {
+      // Conditioned on the proposal still being pending, so two admins
+      // reviewing it at once can't both win (or refund twice). It returns the
+      // document as it was, to read what this review was paid with.
+      const before = (await ProblemProposalModel.findOneAndUpdate(
+        { _id: proposal._id, status: "pending" },
+        { $set: { status: "rejected", pendingCharge: 0, ...reviewFields } },
+        { new: false, session },
+      ).lean()) as unknown as LeanProposal | null;
+      if (!before) throw new AppError(ALREADY_REVIEWED_MESSAGE, 409);
+      // A rejected proposal gets half of what it cost back.
+      const refund = Math.floor((before.pendingCharge ?? 0) / 2);
+      if (refund > 0) {
+        await ProblemProposalModel.updateOne({ _id: proposal._id }, { $inc: { gemsRefunded: refund } }, { session });
+        await refundGems(before.userId, refund, session);
+      }
+    });
+    const rejected = (await ProblemProposalModel.findById(proposal._id).lean()) as unknown as LeanProposal;
     return toDetailDto(rejected, null, await loadProposer(rejected.userId));
   }
 
@@ -541,7 +649,8 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
     await session.withTransaction(async () => {
       const accepted = (await ProblemProposalModel.findOneAndUpdate(
         { _id: proposal._id, status: "pending" },
-        { $set: { status: "accepted", ...reviewFields } },
+        // An accepted proposal keeps its full cost.
+        { $set: { status: "accepted", pendingCharge: 0, ...reviewFields } },
         { new: true, session },
       ).lean()) as unknown as LeanProposal | null;
       if (!accepted) throw new AppError(ALREADY_REVIEWED_MESSAGE, 409);
