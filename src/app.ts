@@ -40,7 +40,9 @@ app.use(
         credentials: true,
     })
 );
-app.use(express.json());
+// 1mb instead of the 100kb default: a problem proposal carries its whole
+// statement and up to 20 test cases.
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 

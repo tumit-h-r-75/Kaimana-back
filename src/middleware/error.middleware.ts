@@ -34,6 +34,10 @@ export const errorHandler = (err: unknown, req: Request, res: Response, next: Ne
         // express.json() rejects a malformed JSON body before any route runs.
         statusCode = 400;
         message = "The request body is not valid JSON.";
+    } else if (typeof err === "object" && err !== null && (err as { type?: unknown }).type === "entity.too.large") {
+        // express.json() stops reading a body over its size limit (see app.ts).
+        statusCode = 413;
+        message = "The request body is too large.";
     } else if (err instanceof mongoose.Error.CastError) {
         // A malformed id or value reaching a query (e.g. GET
         // /api/submissions/abc) is a bad request, not a server crash.
