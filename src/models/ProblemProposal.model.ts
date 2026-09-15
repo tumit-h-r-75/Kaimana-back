@@ -39,6 +39,13 @@ export interface IProblemProposal {
   reviewedAt?: Date;
   // The problem created when the proposal was accepted.
   problemId?: Types.ObjectId;
+  // Gem accounting (see modules/proposal): every time the proposal is sent
+  // for review it costs PROPOSAL_COST_GEMS. `pendingCharge` is what the
+  // current review was paid with — refunded in full if the author deletes the
+  // proposal before review, half if it's rejected, and kept if it's accepted.
+  gemsSpent: number;
+  gemsRefunded: number;
+  pendingCharge: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +92,9 @@ const problemProposalSchema = new Schema<IProblemProposal>(
     reviewedBy: { type: Schema.Types.ObjectId, ref: "User" },
     reviewedAt: { type: Date },
     problemId: { type: Schema.Types.ObjectId, ref: "Problem" },
+    gemsSpent: { type: Number, default: 0, min: 0 },
+    gemsRefunded: { type: Number, default: 0, min: 0 },
+    pendingCharge: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 );
