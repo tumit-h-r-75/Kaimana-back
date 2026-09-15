@@ -7,13 +7,12 @@ import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
 import { AppError } from "../../utils/errors.js";
 import { computeScore } from "../../utils/scoring.js";
-import { gemsForDifficulty } from "../../utils/gems.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
-import { UserModel } from "../../models/User.model.js";
 import { HintUnlockModel, type IHintUnlock } from "../../models/HintUnlock.model.js";
 import { contestService } from "../contest/contest.service.js";
 import { problemService } from "../problem/problem.service.js";
 import { testCaseService } from "../problem/testcase.service.js";
+import { gemsService } from "./gems.service.js";
 import { judgeSubmission } from "./judge.service.js";
 import { runService } from "./run.service.js";
 
@@ -63,9 +62,9 @@ const execute = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
 // serverless instances and cold starts.
 const SUBMISSIONS_PER_MINUTE = 6;
 
-// POST /api/submissions — the system-gate endpoint: create a PENDING
-// submission, judge it synchronously against Judge0 (no queue/worker
-// infrastructure on this Vercel deployment), then return the final verdict.
+// POST /api/submissions — the system-gate endpoint: judge the code
+// synchronously against Judge0 (no queue/worker infrastructure on this Vercel
+// deployment), store the submission with its final verdict, and return it.
 const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { problemId, code, language, contestId } = (req.body ?? {}) as Record<string, unknown>;
 
@@ -89,82 +88,72 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   await testCaseService.getTestCasesForJudging(problemId);
   const contest = contestId ? await contestService.getSubmissionContext(contestId, userId, problemId) : null;
 
+  // When the learner pressed Submit. The contest scoreboard's time window is
+  // checked against this, because the record itself is only created once
+  // judging has finished, a few seconds later.
+  const submittedAt = new Date();
+
+  // Judge first, store after. The submission used to be created as a RUNNING
+  // placeholder before judging and updated afterwards, so whenever the
+  // serverless function was cut off mid-judging (a timeout, a crash, a
+  // deploy) the update never ran and the record stayed RUNNING forever.
+  // Storing only the final result makes that state impossible: an
+  // interrupted run leaves nothing behind, and an infrastructure failure
+  // (Judge0 unavailable, rate-limited or too slow — all 503s, see
+  // judge0.service.ts and judge.service.ts's deadline) simply propagates as
+  // a clean, retryable error with nothing to clean up.
+  const result = await judgeSubmission({ problemId, language, code });
+
+  // Partial credit: score is proportional to how many test cases passed,
+  // not gated to a full ACCEPTED verdict. judge.service.ts stops at the
+  // first failing test, so `passedTests` already holds the count that
+  // ran clean before that point (0 for a COMPILATION_ERROR, since it
+  // never runs any test). computeScore() naturally returns 0 when
+  // passedTests is 0, so nothing needs a separate zero-score branch.
+  //
+  // Hint penalty: any AI hints this learner has unlocked on this problem
+  // (see hint.service.ts) forfeit a percentage of every submission's
+  // score on it, not just the attempt made right after asking — a hint
+  // read once still applies going forward, the same way a wrong answer
+  // costs marks for good on a negative-marking exam.
+  const hintUnlock = await HintUnlockModel.findOne({ userId, problemId })
+    .select("penaltyPercent")
+    .lean<Pick<IHintUnlock, "penaltyPercent"> | null>();
+  const score = computeScore({
+    basePoints: problem.basePoints,
+    passedTests: result.passedTests,
+    totalTests: result.totalTests,
+    hintPenaltyPercent: hintUnlock?.penaltyPercent ?? 0,
+  });
+
   const submission = await SubmissionModel.create({
     userId,
     problemId,
     contestId: contest?.contestId,
     language,
     code,
-    verdict: "RUNNING",
+    verdict: result.verdict,
+    passedTests: result.passedTests,
+    totalTests: result.totalTests,
+    runtimeMs: result.runtimeMs,
+    memoryKb: result.memoryKb,
+    score,
+    errorMessage: result.errorMessage,
+    failedTest: result.failedTest,
+    submittedAt,
   });
 
-  // Set inside the try block below on a first-time ACCEPTED, then read
-  // after — declared out here so it's in scope for the final response
-  // regardless of which path the judging run took.
+  // Gems: a fixed, difficulty-scaled reward paid exactly once per problem,
+  // on the user's first ACCEPTED (see gems.service.ts). A failed payout must
+  // not fail a submission that was already judged and stored — the ledger
+  // has no row for it, so the next accepted submission pays it instead.
   let gemsAwarded = 0;
-
-  try {
-    const result = await judgeSubmission({ problemId, language, code });
-    // Partial credit: score is proportional to how many test cases passed,
-    // not gated to a full ACCEPTED verdict. judge.service.ts stops at the
-    // first failing test, so `passedTests` already holds the count that
-    // ran clean before that point (0 for a COMPILATION_ERROR, since it
-    // never runs any test). computeScore() naturally returns 0 when
-    // passedTests is 0, so nothing needs a separate zero-score branch.
-    //
-    // Hint penalty: any AI hints this learner has unlocked on this problem
-    // (see hint.service.ts) forfeit a percentage of every submission's
-    // score on it, not just the attempt made right after asking — a hint
-    // read once still applies going forward, the same way a wrong answer
-    // costs marks for good on a negative-marking exam.
-    const hintUnlock = await HintUnlockModel.findOne({ userId, problemId })
-      .select("penaltyPercent")
-      .lean<Pick<IHintUnlock, "penaltyPercent"> | null>();
-    const score = computeScore({
-      basePoints: problem.basePoints,
-      passedTests: result.passedTests,
-      totalTests: result.totalTests,
-      hintPenaltyPercent: hintUnlock?.penaltyPercent ?? 0,
-    });
-
-    submission.set({
-      verdict: result.verdict,
-      passedTests: result.passedTests,
-      totalTests: result.totalTests,
-      runtimeMs: result.runtimeMs,
-      memoryKb: result.memoryKb,
-      score,
-      errorMessage: result.errorMessage,
-      failedTest: result.failedTest,
-    });
-    await submission.save();
-
-    // Gems: a fixed, difficulty-scaled reward the first time this user
-    // gets ACCEPTED on this problem. Checked against every OTHER
-    // submission (excluding the one just saved) so re-solving an
-    // already-solved problem — or resubmitting the same passing code —
-    // never pays out twice.
-    if (result.verdict === "ACCEPTED") {
-      const alreadySolved = await SubmissionModel.exists({
-        userId,
-        problemId,
-        verdict: "ACCEPTED",
-        _id: { $ne: submission._id },
-      });
-      if (!alreadySolved) {
-        gemsAwarded = gemsForDifficulty(problem.difficulty);
-        await UserModel.findByIdAndUpdate(userId, { $inc: { gems: gemsAwarded } });
-      }
+  if (result.verdict === "ACCEPTED") {
+    try {
+      gemsAwarded = await gemsService.awardFirstSolveGems({ userId, problemId, submissionId: submission._id, difficulty: problem.difficulty });
+    } catch (error) {
+      console.error("First-solve gem payout failed:", error);
     }
-  } catch (error) {
-    // Judging never reached a verdict: Judge0 was unavailable, rate-limited
-    // or too slow (all surfaced as 503 by judge0.service.ts), or something
-    // unexpected broke. Neither says anything about the learner's code, so
-    // don't keep a RUNTIME_ERROR record that would permanently cost them
-    // score — the problem and its test cases were already validated above.
-    // Delete the placeholder and return a clean, retryable error instead.
-    await SubmissionModel.findByIdAndDelete(submission._id);
-    throw error;
   }
 
   // gemsAwarded rides along on the response only (not persisted on the
