@@ -44,6 +44,10 @@ const contestSchema = new Schema<IContest>(
   { timestamps: true },
 );
 
+// A guest's contest-management list: their own contests, newest start first
+// (see listManagedContests in contest.service.ts).
+contestSchema.index({ createdBy: 1, startTime: -1 });
+
 contestSchema.set("toJSON", {
   virtuals: true,
   transform: (_doc, ret: any) => {
