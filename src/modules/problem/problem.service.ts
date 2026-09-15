@@ -193,17 +193,26 @@ interface IListAllProblemsQuery {
   search?: string;
 }
 
-const listAllForAdmin = async ({ page = 1, limit = 50, search }: IListAllProblemsQuery) => {
+const listAllForAdmin = async ({ page, limit, search }: IListAllProblemsQuery) => {
   const filter: FilterQuery<IProblem> = {};
   if (search) filter.title = { $regex: toSearchRegex(search), $options: "i" };
 
-  const safeLimit = Math.min(Math.max(limit, 1), 200);
-  const safePage = Math.max(page, 1);
+  // The controller passes Number(req.query.x) straight through, so NaN
+  // ("abc"), zero, negative and fractional values all arrive here — NaN in
+  // skip()/limit() used to be a 500. Anything that isn't a positive number
+  // falls back to the default; limit is capped at 100, page kept small enough
+  // that (page - 1) * limit stays a sane skip() value.
+  const toPositiveInt = (value: number | undefined, fallback: number, max: number) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.min(Math.floor(value), max) : fallback;
+  const safeLimit = toPositiveInt(limit, 50, 100);
+  const safePage = toPositiveInt(page, 1, 1_000_000);
 
   const [items, total] = await Promise.all([
     ProblemModel.find(filter)
       .select("slug title difficulty tags basePoints isPublished createdAt")
-      .sort({ createdAt: -1 })
+      // _id breaks createdAt ties (seeded problems share timestamps), so an
+      // item can never repeat on, or vanish between, adjacent pages.
+      .sort({ createdAt: -1, _id: -1 })
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)
       .lean(),
