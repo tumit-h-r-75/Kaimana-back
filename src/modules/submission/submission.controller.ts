@@ -178,20 +178,30 @@ const getById = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
 });
 
 const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const { problemId, page = "1", limit = "20" } = req.query as Record<string, string>;
+  const { problemId, page, limit } = req.query;
   const filter: Record<string, unknown> = { userId: req.user?._id };
   if (problemId) {
-    if (!Types.ObjectId.isValid(String(problemId))) throw new AppError("problemId is not a valid id.", 400);
+    // A repeated ?problemId=a&problemId=b arrives as an array, not a string.
+    if (typeof problemId !== "string" || !Types.ObjectId.isValid(problemId)) throw new AppError("problemId is not a valid id.", 400);
     filter.problemId = problemId;
   }
 
-  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-  const safePage = Math.max(Number(page) || 1, 1);
+  // Non-numeric, zero, negative or fractional page/limit values fall back to
+  // the defaults (a negative limit used to be clamped to 1 item per page);
+  // limit is capped at 100 and page kept small enough for a sane skip().
+  const toPositiveInt = (value: unknown, fallback: number, max: number) => {
+    const parsed = typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(parsed) && parsed >= 1 ? Math.min(Math.floor(parsed), max) : fallback;
+  };
+  const safeLimit = toPositiveInt(limit, 20, 100);
+  const safePage = toPositiveInt(page, 1, 1_000_000);
 
   const [items, total] = await Promise.all([
     SubmissionModel.find(filter)
       .select("problemId language verdict passedTests totalTests runtimeMs score createdAt")
-      .sort({ createdAt: -1 })
+      // _id breaks createdAt ties so an item never repeats on, or vanishes
+      // between, adjacent pages.
+      .sort({ createdAt: -1, _id: -1 })
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit),
     SubmissionModel.countDocuments(filter),
