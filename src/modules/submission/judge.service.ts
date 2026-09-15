@@ -5,6 +5,7 @@ import { runAgainstTestCase } from "../../integrations/judge0/judge0.service.js"
 import { problemService } from "../problem/problem.service.js";
 import { testCaseService } from "../problem/testcase.service.js";
 import type { IFailedTest, Verdict } from "../../models/Submission.model.js";
+import { AppError } from "../../utils/errors.js";
 
 // Output comparison is intentionally lenient: trailing whitespace per line,
 // trailing blank lines, and CRLF/LF differences should never cause a false
@@ -24,6 +25,12 @@ export const normalizeOutput = (raw: string): string =>
 // test" verdict without flooding the shared public Judge0 instance.
 const JUDGE_BATCH_SIZE = 3;
 
+// Upper bound for one judging run. A serverless function that runs out of time
+// is killed mid-request with no chance to respond; giving up before that
+// (between batches) returns a clean, retryable 503 instead. Nothing is stored
+// for a run that never reached a verdict (see submission.controller.ts).
+const JUDGE_DEADLINE_MS = 45_000;
+
 export interface JudgeResult {
   verdict: Verdict;
   passedTests: number;
@@ -41,11 +48,15 @@ export const judgeSubmission = async (params: {
 }): Promise<JudgeResult> => {
   const problem = await problemService.getProblemForJudging(params.problemId);
   const testCases = await testCaseService.getTestCasesForJudging(params.problemId);
+  const deadline = Date.now() + JUDGE_DEADLINE_MS;
 
   let maxRuntimeMs = 0;
   let maxMemoryKb = 0;
 
   for (let start = 0; start < testCases.length; start += JUDGE_BATCH_SIZE) {
+    if (Date.now() > deadline) {
+      throw new AppError("Judging is taking too long right now. Please submit again in a moment.", 503);
+    }
     const batch = testCases.slice(start, start + JUDGE_BATCH_SIZE);
     const outcomes = await Promise.all(
       batch.map((testCase) =>
