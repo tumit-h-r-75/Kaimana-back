@@ -6,7 +6,7 @@ export interface IUser {
   name: string;
   email: string;
   profilePicUrl?: string;
-  role: "user" | "admin";
+  role: "user" | "guest" | "admin";
   status: "active" | "blocked";
   // Lightweight reward currency, separate from a problem's score — earned
   // once per problem on first ACCEPTED (see utils/gems.ts and
@@ -53,7 +53,7 @@ const userSchema = new Schema<IUser>(
 
     role: {
       type: String,
-      enum: ["user", "admin"],
+      enum: ["user", "guest", "admin"],
       default: "user",
     },
 

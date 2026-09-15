@@ -23,7 +23,7 @@ const AVATAR_UPLOADS_NOT_CONFIGURED = "Avatar uploads are not configured on the 
 // Every flow that signs a user in (Google, password login/register, refresh,
 // password change) issues its tokens here, so they all carry the same
 // claims — including `tv`, the tokenVersion that makes a session revocable.
-const issueTokens = (user: { _id: unknown; name: string; email: string; role: "user" | "admin"; tokenVersion?: number }) => {
+const issueTokens = (user: { _id: unknown; name: string; email: string; role: "user" | "guest" | "admin"; tokenVersion?: number }) => {
     const payload = jwtUtils.buildSessionPayload(user);
     return { accessToken: jwtUtils.createToken(payload, config.jwtAccessSecret, config.jwtAccessExpiresIn as SignOptions), refreshToken: jwtUtils.createToken(payload, config.jwtRefreshSecret, config.jwtRefreshExpiresIn as SignOptions) };
 };

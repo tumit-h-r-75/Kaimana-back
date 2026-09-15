@@ -32,7 +32,7 @@ export const optionalAuth = async (req: AuthenticatedRequest, _res: Response, ne
 
   try {
     const liveUser = (await UserModel.findById(payloads[0]._id).select("role status tokenVersion").lean()) as unknown as
-      | { role: "user" | "admin"; status: "active" | "blocked"; tokenVersion?: number }
+      | { role: "user" | "guest" | "admin"; status: "active" | "blocked"; tokenVersion?: number }
       | null;
     if (liveUser && liveUser.status !== "blocked") {
       const payload = payloads.find(

@@ -52,7 +52,7 @@ export const requireAuth = async (req: AuthenticatedRequest, _res: Response, nex
     // .lean() needs the explicit cast the rest of the codebase already uses
     // for this model (auth.service.ts, admin.service.ts).
     const liveUser = (await UserModel.findById(payloads[0]._id).select("role status tokenVersion").lean()) as unknown as
-      | { role: "user" | "admin"; status: "active" | "blocked"; tokenVersion?: number }
+      | { role: "user" | "guest" | "admin"; status: "active" | "blocked"; tokenVersion?: number }
       | null;
     if (!liveUser) return next(new AppError("Invalid or expired session.", 401));
     if (liveUser.status === "blocked") return next(new AppError("This account has been blocked.", 403));
