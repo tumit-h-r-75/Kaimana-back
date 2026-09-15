@@ -11,7 +11,8 @@ export interface IUser {
   // Lightweight reward currency, separate from a problem's score — earned
   // once per problem on first ACCEPTED (see utils/gems.ts and
   // submission.controller.ts), shown in the site header. Never goes
-  // negative; nothing spends it yet.
+  // negative. Reaching PROPOSAL_MIN_GEMS unlocks proposing problems
+  // (modules/proposal); no gems are deducted for that.
   gems: number;
   // Session revocation counter. Every access/refresh token carries the
   // value it was issued under (the `tv` claim, see utils/jwt.ts), so
