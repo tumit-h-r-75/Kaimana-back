@@ -4,7 +4,11 @@ import httpStatus from "http-status";
 import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
 import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
-import { contestService } from "./contest.service.js";
+import { contestService, type ContestManager } from "./contest.service.js";
+
+// requireAuth refreshes role from the database on every request, so this is
+// the caller's current role rather than the one baked into their token.
+const toManager = (req: AuthenticatedRequest): ContestManager => ({ userId: String(req.user?._id), role: String(req.user?.role) });
 
 const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { page = "1", limit = "20" } = req.query as Record<string, string>;
@@ -18,7 +22,7 @@ const getByIdentifier = catchAsync(async (req: AuthenticatedRequest, res: Respon
 });
 
 const create = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const contest = await contestService.createContest(req.body, String(req.user?._id));
+  const contest = await contestService.createContest(req.body, toManager(req));
   sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Contest created", data: contest });
 });
 
@@ -32,4 +36,35 @@ const getScoreboard = catchAsync(async (req: AuthenticatedRequest, res: Response
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Scoreboard loaded", data: result });
 });
 
-export const contestController = { list, getByIdentifier, create, register, getScoreboard };
+const listManaged = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const { page, limit, search } = req.query;
+  const result = await contestService.listManagedContests(toManager(req), { page, limit, search });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Contests loaded", data: result });
+});
+
+const getManaged = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const contest = await contestService.getManagedContest(String(req.params.id), toManager(req));
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Contest loaded", data: contest });
+});
+
+const updateManaged = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const contest = await contestService.updateManagedContest(String(req.params.id), toManager(req), req.body);
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Contest updated", data: contest });
+});
+
+const deleteManaged = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const result = await contestService.deleteManagedContest(String(req.params.id), toManager(req));
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Contest deleted", data: result });
+});
+
+export const contestController = {
+  list,
+  getByIdentifier,
+  create,
+  register,
+  getScoreboard,
+  listManaged,
+  getManaged,
+  updateManaged,
+  deleteManaged,
+};
