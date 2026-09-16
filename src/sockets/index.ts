@@ -46,3 +46,10 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
   console.log("⚡ Socket.IO server initialized with JWT auth");
   return io;
 };
+
+export const getIO = (): Server => {
+  if (!io) {
+    throw new Error("Socket.IO has not been initialized yet. Call initSocketServer first.");
+  }
+  return io;
+};
