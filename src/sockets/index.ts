@@ -31,3 +31,18 @@ const authMiddleware = (socket: Socket, next: (err?: Error) => void) => {
     next(new Error("Authentication error: Internal validation failure"));
   }
 };
+
+export const initSocketServer = (httpServer: HttpServer): Server => {
+  io = new Server(httpServer, {
+    cors: {
+      origin: config.corsOrigin || "*",
+      credentials: true,
+    },
+  });
+
+  io.use(authMiddleware);
+  registerSocketHandlers(io);
+
+  console.log("⚡ Socket.IO server initialized with JWT auth");
+  return io;
+};
