@@ -224,30 +224,6 @@ const backfillGemsForUser = async (userId: string): Promise<number> => {
     return total;
 };
 
-// Gems shipped after some users had already solved problems the normal
-// way (submission.controller.ts only awards gems on a NEW first-ever
-// ACCEPTED, so an already-solved problem never re-triggers it). Rather
-// than a one-off migration script against production data, this backfills
-// lazily and idempotently: `.lean()` queries never apply schema defaults
-// for a field that was never actually written to the document, so an
-// account from before this feature has no `gems` key at all (not even
-// 0) — that missing key IS the "never backfilled" signal. Once computed
-// and persisted here, the key exists (even at 0) and this never runs
-// again for that user; a genuinely new user with nothing solved yet also
-// converges to a real, present 0 on their very first /auth/me call.
-const backfillGemsForUser = async (userId: string): Promise<number> => {
-    const solvedProblemIds = await SubmissionModel.distinct("problemId", { userId, verdict: "ACCEPTED" });
-    let total = 0;
-    if (solvedProblemIds.length > 0) {
-        const problems = await ProblemModel.find({ _id: { $in: solvedProblemIds } })
-            .select("difficulty")
-            .lean<{ difficulty: string }[]>();
-        total = problems.reduce((sum, problem) => sum + gemsForDifficulty(problem.difficulty), 0);
-    }
-    await UserModel.findByIdAndUpdate(userId, { $set: { gems: total } });
-    return total;
-};
-
 const getUserById = async (id: string) => {
     // passwordHash is select:false on the schema (never returned by default)
     // — pulled in here only to derive hasPassword, then stripped before the

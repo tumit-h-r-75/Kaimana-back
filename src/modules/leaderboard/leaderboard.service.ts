@@ -1,5 +1,5 @@
 // Service for aggregating submission data to compute global user rankings.
-import type { PipelineStage } from "mongoose";
+import { Types, type PipelineStage } from "mongoose";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { UserModel } from "../../models/User.model.js";
 
@@ -92,19 +92,35 @@ export const getGlobalLeaderboard = async ({ page, limit }: { page: number; limi
 // Ranks are computed over the full standings (no skip/limit) so a user far
 // down the list still gets an accurate position — fine at this dataset size.
 export const getMyRank = async (userId: string) => {
-  const rows = await SubmissionModel.aggregate(bestScoresPipeline());
-  const index = rows.findIndex((row) => String(row._id) === String(userId));
-
-  if (index === -1) {
-    return { rank: null, totalScore: 0, problemsSolved: 0, totalRanked: rows.length };
+  // 1. Get the user's own totalScore and problemsSolved
+  const userScores = await SubmissionModel.aggregate([
+    { $match: { userId: new Types.ObjectId(userId) } },
+    ...bestScoresPipeline(),
+  ]);
+  if (!userScores.length) {
+    return { rank: null, totalScore: 0, problemsSolved: 0, totalRanked: 0 };
   }
 
-  const row = rows[index];
+  const { totalScore, problemsSolved } = userScores[0];
+
+  // 2. Count how many users are ahead of this user directly in MongoDB
+  const aheadCount = await SubmissionModel.aggregate([
+    ...bestScoresPipeline(),
+    {
+      $match: {
+        $or: [
+          { totalScore: { $gt: totalScore } },
+          { totalScore: totalScore, problemsSolved: { $gt: problemsSolved } },
+        ],
+      },
+    },
+    { $count: "count" },
+  ]);
+  const usersAhead = aheadCount[0]?.count ?? 0;
   return {
-    rank: index + 1,
-    totalScore: row.totalScore,
-    problemsSolved: row.problemsSolved,
-    totalRanked: rows.length,
+    rank: usersAhead + 1, // Rank is (Users Ahead + 1)
+    totalScore,
+    problemsSolved,
   };
 };
 
