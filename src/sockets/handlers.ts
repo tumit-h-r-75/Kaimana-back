@@ -1,6 +1,10 @@
 // Event handler functions for Socket.IO events delegating to module services.
-import type { Server } from "socket.io";
+
+import type { Server, Socket } from "socket.io";
+
+export const getContestRoom = (contestId: string) => `contest:${contestId}`;
+export const GLOBAL_LEADERBOARD_ROOM = "leaderboard:global";
 
 export const registerSocketHandlers = (io: Server) => {
-  // Stub handler to be populated in next step
+  // Handlers to be attached below
 };
