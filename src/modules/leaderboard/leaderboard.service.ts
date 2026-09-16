@@ -92,6 +92,7 @@ export const getGlobalLeaderboard = async ({ page, limit }: { page: number; limi
 // Ranks are computed over the full standings (no skip/limit) so a user far
 // down the list still gets an accurate position — fine at this dataset size.
 export const getMyRank = async (userId: string) => {
+
   // 1. Get the user's own totalScore and problemsSolved
   const userScores = await SubmissionModel.aggregate([
     { $match: { userId: new Types.ObjectId(userId) } },
