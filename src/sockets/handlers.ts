@@ -6,5 +6,12 @@ export const getContestRoom = (contestId: string) => `contest:${contestId}`;
 export const GLOBAL_LEADERBOARD_ROOM = "leaderboard:global";
 
 export const registerSocketHandlers = (io: Server) => {
-  // Handlers to be attached below
+  io.on("connection", (socket: Socket) => {
+    const user = socket.data.user;
+    console.log(`🔌 Socket connected: ${socket.id} (User: ${user?.name ?? user?._id ?? "Unknown"})`);
+
+    socket.on("disconnect", (reason) => {
+      console.log(`🔌 Socket disconnected: ${socket.id} (Reason: ${reason})`);
+    });
+  });
 };
