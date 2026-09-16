@@ -35,7 +35,7 @@ const authMiddleware = (socket: Socket, next: (err?: Error) => void) => {
 export const initSocketServer = (httpServer: HttpServer): Server => {
   io = new Server(httpServer, {
     cors: {
-      origin: config.corsOrigin || "*",
+      origin: config.frontendUrls || "*",
       credentials: true,
     },
   });
