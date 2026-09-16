@@ -37,5 +37,18 @@ export const registerSocketHandlers = (io: Server) => {
         console.log(`🚪 Socket ${socket.id} left room: ${room}`);
       }
     });
+
+    // Join Global Leaderboard Room
+    socket.on("join:leaderboard", () => {
+      socket.join(GLOBAL_LEADERBOARD_ROOM);
+      console.log(`🏆 Socket ${socket.id} joined room: ${GLOBAL_LEADERBOARD_ROOM}`);
+      socket.emit("joined:leaderboard", { room: GLOBAL_LEADERBOARD_ROOM });
+    });
+
+    // Leave Global Leaderboard Room
+    socket.on("leave:leaderboard", () => {
+      socket.leave(GLOBAL_LEADERBOARD_ROOM);
+      console.log(`🚪 Socket ${socket.id} left room: ${GLOBAL_LEADERBOARD_ROOM}`);
+    });
   });
 };
