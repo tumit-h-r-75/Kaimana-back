@@ -17,6 +17,9 @@ import { testCaseService } from "../problem/testcase.service.js";
 import { gemsService } from "./gems.service.js";
 import { judgeSubmission } from "./judge.service.js";
 import { runService } from "./run.service.js";
+import { getIO } from "../../sockets/index.js";
+import { getContestRoom, GLOBAL_LEADERBOARD_ROOM } from "../../sockets/handlers.js";
+import { leaderboardService } from "../leaderboard/leaderboard.service.js";
 
 const MAX_CODE_LENGTH = 20_000;
 const MAX_CUSTOM_INPUT_LENGTH = 5_000;
@@ -157,6 +160,26 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
       console.error("First-solve gem payout failed:", error);
     }
   }
+
+  // Trigger real-time Socket.IO broadcasts asynchronously (must not delay HTTP response)
+  void (async () => {
+    try {
+      const io = getIO();
+
+      // 1. Broadcast updated contest scoreboard to users viewing this contest
+      if (contest?.contestId) {
+        const contestIdStr = String(contest.contestId);
+        const scoreboard = await contestService.getScoreboard(contestIdStr);
+        io.to(getContestRoom(contestIdStr)).emit("contest:scoreboard", scoreboard);
+      }
+
+      // 2. Broadcast updated global leaderboard to users viewing the leaderboard page
+      const leaderboard = await leaderboardService.getGlobalLeaderboard({ page: 1, limit: 50 });
+      io.to(GLOBAL_LEADERBOARD_ROOM).emit("leaderboard:update", leaderboard);
+    } catch (err) {
+      console.error("Socket broadcast failed after submission:", err);
+    }
+  })();
 
   // gemsAwarded rides along on the response only (not persisted on the
   // submission document) so the frontend can show a "+N gems" toast right
