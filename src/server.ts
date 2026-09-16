@@ -4,11 +4,15 @@ import http from "http";
 import app from "./app.js";
 import { config } from "./config/env.js";
 import { connectDatabase } from "./config/database.js";
+import { initSocketServer } from "./sockets/index.js";
 
 const PORT = config.port;
 
 // Create HTTP server
 const server = http.createServer(app);
+
+// Initialize Socket.IO server with WebSocket handlers and JWT auth
+initSocketServer(server);
 
 const reconnectDatabase = async () => {
     try {
