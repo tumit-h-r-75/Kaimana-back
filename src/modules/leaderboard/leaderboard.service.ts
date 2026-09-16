@@ -25,6 +25,7 @@ const bestScoresPipeline = (): PipelineStage[] => [
       _id: { userId: "$userId", problemId: "$problemId" },
       bestScore: { $max: "$score" },
       solved: { $max: { $cond: [{ $eq: ["$verdict", "ACCEPTED"] }, 1, 0] } },
+      lastSubmitTime: { $max: "$submittedAt" },
     },
   },
   { $match: { bestScore: { $gt: 0 } } },
@@ -33,12 +34,13 @@ const bestScoresPipeline = (): PipelineStage[] => [
       _id: "$_id.userId",
       totalScore: { $sum: "$bestScore" },
       problemsSolved: { $sum: "$solved" },
+      lastSubmitTime: { $max: "$lastSubmitTime" },
     },
   },
   // _id (the user id) is a unique final tiebreaker: without it, users tied
-  // on score and solves have no defined order, so $skip/$limit pages could
+  // on score, solves, and submit time have no defined order, so $skip/$limit pages could
   // repeat or drop them from one request to the next.
-  { $sort: { totalScore: -1, problemsSolved: -1, _id: 1 } },
+  { $sort: { totalScore: -1, problemsSolved: -1, lastSubmitTime: 1, _id: 1 } },
 ];
 
 export const getGlobalLeaderboard = async ({ page, limit }: { page: number; limit: number }) => {
@@ -92,8 +94,7 @@ export const getGlobalLeaderboard = async ({ page, limit }: { page: number; limi
 // Ranks are computed over the full standings (no skip/limit) so a user far
 // down the list still gets an accurate position — fine at this dataset size.
 export const getMyRank = async (userId: string) => {
-
-  // 1. Get the user's own totalScore and problemsSolved
+  // 1. Get the user's own totalScore, problemsSolved, and lastSubmitTime
   const userScores = await SubmissionModel.aggregate([
     { $match: { userId: new Types.ObjectId(userId) } },
     ...bestScoresPipeline(),
@@ -102,7 +103,7 @@ export const getMyRank = async (userId: string) => {
     return { rank: null, totalScore: 0, problemsSolved: 0, totalRanked: 0 };
   }
 
-  const { totalScore, problemsSolved } = userScores[0];
+  const { totalScore, problemsSolved, lastSubmitTime } = userScores[0];
 
   // 2. Count how many users are ahead of this user directly in MongoDB
   const aheadCount = await SubmissionModel.aggregate([
@@ -112,6 +113,7 @@ export const getMyRank = async (userId: string) => {
         $or: [
           { totalScore: { $gt: totalScore } },
           { totalScore: totalScore, problemsSolved: { $gt: problemsSolved } },
+          { totalScore: totalScore, problemsSolved: problemsSolved, lastSubmitTime: { $lt: lastSubmitTime } },
         ],
       },
     },
