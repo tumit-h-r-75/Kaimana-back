@@ -8,3 +8,26 @@ import { registerSocketHandlers } from "./handlers.js";
 
 // Singleton Socket.IO instance placeholder
 let io: Server | null = null;
+
+// Socket.IO middleware that runs on EVERY new client connection handshake
+const authMiddleware = (socket: Socket, next: (err?: Error) => void) => {
+  try {
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.headers?.authorization?.replace("Bearer ", "");
+
+    if (!token) {
+      return next(new Error("Authentication error: Token required"));
+    }
+
+    const verified = jwtUtils.verifyToken(token, config.jwtAccessSecret);
+    if (!verified.success || !verified.data) {
+      return next(new Error("Authentication error: Invalid or expired token"));
+    }
+
+    socket.data.user = verified.data;
+    next();
+  } catch (err) {
+    next(new Error("Authentication error: Internal validation failure"));
+  }
+};
