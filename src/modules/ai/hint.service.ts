@@ -8,6 +8,7 @@
 // with zero setup — the same "Plan B" philosophy the judge already uses
 // for Judge0.
 
+import { Types } from "mongoose";
 import { ProblemModel, type IProblem } from "../../models/Problem.model.js";
 import { HintUnlockModel } from "../../models/HintUnlock.model.js";
 import { AppError } from "../../utils/errors.js";
@@ -103,23 +104,46 @@ export const getHint = async ({
   problemId,
   level,
   code,
+  role,
 }: {
   userId: string;
   problemId: string;
   level: number;
   code?: string;
+  role?: string;
 }) => {
   const requestedLevel = Math.min(Math.max(Math.trunc(level) || 1, 1), MAX_HINT_LEVEL);
 
-  const problem = await ProblemModel.findById(problemId).select("title statement constraints tags difficulty").lean<IProblem | null>();
-  if (!problem) throw new AppError("Problem not found.", 404);
+  // Checked up front: a malformed id would otherwise reach Mongoose as a
+  // CastError and surface as a 500.
+  if (typeof problemId !== "string" || !Types.ObjectId.isValid(problemId)) throw new AppError("Invalid problem id.", 400);
+
+  const problem = await ProblemModel.findById(problemId).select("title statement constraints tags difficulty isPublished").lean<IProblem | null>();
+  // Unpublished drafts are hidden from non-admins everywhere else (see
+  // problem.service.ts), so their hints — grounded in the statement — are
+  // too, reported as missing rather than forbidden.
+  if (!problem || (!problem.isPublished && role !== "admin")) throw new AppError("Problem not found.", 404);
 
   // Lazily create the unlock record on this learner's first hint request
   // for this problem — everyone starts at tier 0 (nothing unlocked, no
-  // penalty) until they actually spend score on a hint.
-  let unlock = await HintUnlockModel.findOne({ userId, problemId });
-  if (!unlock) {
-    unlock = await HintUnlockModel.create({ userId, problemId, unlockedTier: 0, penaltyPercent: 0 });
+  // penalty) until they actually spend score on a hint. One atomic upsert
+  // rather than findOne-then-create: two near-simultaneous requests (a
+  // double-click) would otherwise both miss and both insert, and the second
+  // would hit the unique (userId, problemId) index as a 500. If the upsert
+  // itself still races into a duplicate-key error, the record now exists,
+  // so a single retry simply reads it.
+  const findOrCreateUnlock = () =>
+    HintUnlockModel.findOneAndUpdate(
+      { userId, problemId },
+      { $setOnInsert: { unlockedTier: 0, penaltyPercent: 0 } },
+      { upsert: true, new: true },
+    );
+  let unlock;
+  try {
+    unlock = await findOrCreateUnlock();
+  } catch (error) {
+    if ((error as { code?: number }).code !== 11000) throw error;
+    unlock = await findOrCreateUnlock();
   }
 
   // Tiers unlock strictly in order and can't be skipped: a request for a

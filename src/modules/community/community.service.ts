@@ -1,10 +1,14 @@
 // Service backing the public community feed — every ACCEPTED submission is
 // automatically visible here (there is no "share/make public" toggle, this
 // mirrors how Codeforces/LeetCode public solution feeds work) — plus the
-// comment thread (ReviewModel) attached to each one.
+// comment thread (ReviewModel) attached to each one. The one exception is
+// code that would give away a contest still in progress — see
+// getCommunityVisibleFilter below.
 
+import { Types } from "mongoose";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ReviewModel } from "../../models/Review.model.js";
+import { ContestModel } from "../../models/Contest.model.js";
 import { AppError } from "../../utils/errors.js";
 
 const NOT_FOUND_MESSAGE = "This submission isn't available in the community.";
@@ -35,17 +39,38 @@ const toFeedItem = (submission: any, commentCount: number) => ({
   commentCount,
 });
 
+// Publishing every ACCEPTED solution the moment it's judged would hand live
+// contest answers to anyone watching the feed. A submission stays hidden
+// while (a) the contest it was submitted to hasn't ended yet, or (b) its
+// problem belongs to a published contest that is running right now — which
+// also covers a practice-mode solve of a problem currently in a contest.
+// Recomputed against the clock on every request, so hidden code reappears
+// on its own once the contest is over.
+const getCommunityVisibleFilter = async () => {
+  const now = new Date();
+  const [unfinishedContestIds, liveContestProblemIds] = await Promise.all([
+    ContestModel.distinct("_id", { endTime: { $gt: now } }),
+    ContestModel.distinct("problems.problemId", { isPublished: true, startTime: { $lte: now }, endTime: { $gt: now } }),
+  ]);
+  return {
+    verdict: "ACCEPTED",
+    contestId: { $nin: unfinishedContestIds },
+    problemId: { $nin: liveContestProblemIds },
+  };
+};
+
 export const getFeed = async ({ page, limit }: { page: number; limit: number }) => {
   const skip = (page - 1) * limit;
+  const visibleFilter = await getCommunityVisibleFilter();
 
   const [submissions, total] = await Promise.all([
-    SubmissionModel.find({ verdict: "ACCEPTED" })
+    SubmissionModel.find(visibleFilter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate("userId", "name profilePicUrl")
       .populate("problemId", "title slug difficulty"),
-    SubmissionModel.countDocuments({ verdict: "ACCEPTED" }),
+    SubmissionModel.countDocuments(visibleFilter),
   ]);
 
   const items = await Promise.all(
@@ -58,16 +83,19 @@ export const getFeed = async ({ page, limit }: { page: number; limit: number }) 
   return { items, total, page, limit };
 };
 
-// Fetches a submission and guarantees it's a valid, community-visible
-// (ACCEPTED) one — used by both the detail page and comment endpoints.
-// Missing and non-ACCEPTED submissions are deliberately reported the same
-// way (a 404) so a caller can't probe which submission ids exist.
+// Fetches a submission and guarantees it's a valid, community-visible one
+// (ACCEPTED and not hidden by a live contest) — used by both the detail page
+// and comment endpoints. Missing, non-ACCEPTED and contest-hidden
+// submissions are deliberately reported the same way (a 404) so a caller
+// can't probe which submission ids exist.
 const getAcceptedSubmissionOrThrow = async (submissionId: string) => {
-  const submission = await SubmissionModel.findById(submissionId)
+  if (!Types.ObjectId.isValid(submissionId)) throw new AppError(NOT_FOUND_MESSAGE, 404);
+
+  const submission = await SubmissionModel.findOne({ ...(await getCommunityVisibleFilter()), _id: submissionId })
     .populate("userId", "name profilePicUrl")
     .populate("problemId", "title slug difficulty");
 
-  if (!submission || submission.verdict !== "ACCEPTED") {
+  if (!submission) {
     throw new AppError(NOT_FOUND_MESSAGE, 404);
   }
 
@@ -88,6 +116,10 @@ const toCommentDto = (review: any) => ({
 });
 
 export const listComments = async (submissionId: string) => {
+  // Same visibility guard as the detail page — a thread on a hidden
+  // submission can quote or discuss its code, so it's hidden too.
+  await getAcceptedSubmissionOrThrow(submissionId);
+
   const reviews = await ReviewModel.find({ submissionId }).sort({ createdAt: 1 }).populate("userId", "name profilePicUrl");
   return reviews.map(toCommentDto);
 };
@@ -96,7 +128,7 @@ export const addComment = async (submissionId: string, userId: string, content: 
   const trimmed = content?.trim() ?? "";
   if (!trimmed) throw new AppError("Comment cannot be empty.", 400);
 
-  // Reuse the same "exists and is ACCEPTED" guard as the detail page.
+  // Reuse the same "exists and is visible" guard as the detail page.
   await getAcceptedSubmissionOrThrow(submissionId);
 
   const review = await ReviewModel.create({ submissionId, userId, content: trimmed });

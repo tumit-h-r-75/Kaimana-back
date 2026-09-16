@@ -35,7 +35,10 @@ const bestScoresPipeline = (): PipelineStage[] => [
       problemsSolved: { $sum: "$solved" },
     },
   },
-  { $sort: { totalScore: -1, problemsSolved: -1 } },
+  // _id (the user id) is a unique final tiebreaker: without it, users tied
+  // on score and solves have no defined order, so $skip/$limit pages could
+  // repeat or drop them from one request to the next.
+  { $sort: { totalScore: -1, problemsSolved: -1, _id: 1 } },
 ];
 
 export const getGlobalLeaderboard = async ({ page, limit }: { page: number; limit: number }) => {

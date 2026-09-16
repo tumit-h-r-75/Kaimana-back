@@ -153,6 +153,9 @@ const submissionSchema = new Schema<ISubmission>(
 );
 
 submissionSchema.index({ userId: 1, problemId: 1, createdAt: -1 });
+// Contest scoreboard: a contest's submissions inside its time window (see
+// contest.service.ts getScoreboard, which filters on submittedAt).
+submissionSchema.index({ contestId: 1, submittedAt: 1 }, { partialFilterExpression: { contestId: { $exists: true } } });
 
 submissionSchema.set("toJSON", {
   virtuals: true,

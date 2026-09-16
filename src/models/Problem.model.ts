@@ -27,9 +27,10 @@ export interface IProblem {
     python?: string;
     cpp?: string;
     javascript?: string;
+    typescript?: string;
   };
   referenceSolution?: {
-    language: "python" | "cpp" | "javascript";
+    language: "python" | "cpp" | "javascript" | "typescript";
     code: string;
   };
   isPublished: boolean;
@@ -38,10 +39,13 @@ export interface IProblem {
   updatedAt: Date;
 }
 
+// Not `required: true`: Mongoose's string required-validator rejects "", but
+// an empty input or expected output is a legitimate sample (e.g. merging two
+// empty arrays) — see TestCase.model.ts for the same reasoning.
 const sampleTestSchema = new Schema<ISampleTest>(
   {
-    input: { type: String, required: true },
-    expectedOutput: { type: String, required: true },
+    input: { type: String, default: "" },
+    expectedOutput: { type: String, default: "" },
     explanation: { type: String },
   },
   { _id: false },
@@ -65,9 +69,10 @@ const problemSchema = new Schema<IProblem>(
       python: { type: String, default: "" },
       cpp: { type: String, default: "" },
       javascript: { type: String, default: "" },
+      typescript: { type: String, default: "" },
     },
     referenceSolution: {
-      language: { type: String, enum: ["python", "cpp", "javascript"] },
+      language: { type: String, enum: ["python", "cpp", "javascript", "typescript"] },
       code: { type: String },
     },
     isPublished: { type: Boolean, default: true, index: true },

@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import { config } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
+import { AppError } from "./utils/errors.js";
 import { authRouter } from "./modules/auth/auth.route.js";
 import { authController } from "./modules/auth/auth.controller.js";
 import { submissionRouter } from "./modules/submission/submission.route.js";
@@ -16,6 +17,9 @@ import { adminRouter } from "./modules/admin/admin.route.js";
 import { analyticsRouter } from "./modules/analytics/analytics.route.js";
 import { interviewRouter } from "./modules/interview/interview.route.js";
 import { communityRouter } from "./modules/community/community.route.js";
+import { hostRequestRouter } from "./modules/host/host.route.js";
+import { kidsRouter } from "./modules/kids/kids.route.js";
+import { proposalRouter } from "./modules/proposal/proposal.route.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
@@ -32,12 +36,14 @@ app.use(
                 return callback(null, true);
             }
 
-            return callback(new Error("Origin is not allowed by CORS"));
+            return callback(new AppError("Origin is not allowed by CORS.", 403));
         },
         credentials: true,
     })
 );
-app.use(express.json());
+// 1mb instead of the 100kb default: a problem proposal carries its whole
+// statement and up to 20 test cases.
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
@@ -73,6 +79,9 @@ app.use("/api/admin", adminRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/interview", interviewRouter);
 app.use("/api/community", communityRouter);
+app.use("/api/host-requests", hostRequestRouter);
+app.use("/api/kids", kidsRouter);
+app.use("/api/proposals", proposalRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);
