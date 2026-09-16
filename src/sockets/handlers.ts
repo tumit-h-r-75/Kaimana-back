@@ -13,5 +13,29 @@ export const registerSocketHandlers = (io: Server) => {
     socket.on("disconnect", (reason) => {
       console.log(`🔌 Socket disconnected: ${socket.id} (Reason: ${reason})`);
     });
+
+    // Join Contest Scoreboard Room
+    socket.on("join:contest", (payload: { contestId?: string }) => {
+      const contestId = payload?.contestId;
+      if (typeof contestId !== "string" || !contestId.trim()) {
+        socket.emit("error", { message: "contestId is required to join contest room." });
+        return;
+      }
+
+      const room = getContestRoom(contestId.trim());
+      socket.join(room);
+      console.log(`🎯 Socket ${socket.id} joined room: ${room}`);
+      socket.emit("joined:contest", { contestId, room });
+    });
+
+    // Leave Contest Scoreboard Room
+    socket.on("leave:contest", (payload: { contestId?: string }) => {
+      const contestId = payload?.contestId;
+      if (typeof contestId === "string" && contestId.trim()) {
+        const room = getContestRoom(contestId.trim());
+        socket.leave(room);
+        console.log(`🚪 Socket ${socket.id} left room: ${room}`);
+      }
+    });
   });
 };
