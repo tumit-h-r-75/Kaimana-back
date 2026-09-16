@@ -332,22 +332,33 @@ const getScoreboard = async (identifier: string) => {
         _id: { userId: "$userId", problemId: "$problemId" },
         bestScore: { $max: "$score" },
         solved: { $max: { $cond: [{ $eq: ["$verdict", "ACCEPTED"] }, 1, 0] } },
+        lastSubmitTime: { $max: "$submittedAt" },
       },
     },
-  ])) as { _id: { userId: Types.ObjectId; problemId: Types.ObjectId }; bestScore: number; solved: number }[];
+  ])) as { _id: { userId: Types.ObjectId; problemId: Types.ObjectId }; bestScore: number; solved: number; lastSubmitTime?: Date }[];
 
   // A submission's score is out of the problem's basePoints, but the contest
   // advertises (and admins set) its own points per problem — rescale each
   // best score to those points instead of silently summing basePoints.
-  const totals = new Map<string, { totalScore: number; problemsSolved: number }>();
+  // Also compute CP standard penalty seconds (elapsed time from contest start).
+  const totals = new Map<string, { totalScore: number; problemsSolved: number; penaltySeconds: number }>();
+  const startTimeMs = contest.startTime.getTime();
+
   for (const row of rows) {
     const problemKey = String(row._id.problemId);
     const points = pointsByProblem.get(problemKey) ?? 0;
     const basePoints = basePointsByProblem.get(problemKey) ?? 100;
     const userKey = String(row._id.userId);
-    const current = totals.get(userKey) ?? { totalScore: 0, problemsSolved: 0 };
+    const current = totals.get(userKey) ?? { totalScore: 0, problemsSolved: 0, penaltySeconds: 0 };
     current.totalScore += Math.round(((row.bestScore ?? 0) / basePoints) * points);
     current.problemsSolved += row.solved;
+
+    if (row.bestScore > 0 && row.lastSubmitTime) {
+      const submitTimeMs = new Date(row.lastSubmitTime).getTime();
+      const elapsedSeconds = Math.max(0, Math.floor((submitTimeMs - startTimeMs) / 1000));
+      current.penaltySeconds += elapsedSeconds;
+    }
+
     totals.set(userKey, current);
   }
 
@@ -359,9 +370,19 @@ const getScoreboard = async (identifier: string) => {
 
   const ranked = scoredUserIds
     .filter((userId) => nameById.has(userId))
-    .map((userId) => ({ userId, name: nameById.get(userId) as string, ...(totals.get(userId) as { totalScore: number; problemsSolved: number }) }))
-    // userId as the final tiebreaker keeps tied ranks stable between loads.
-    .sort((a, b) => b.totalScore - a.totalScore || b.problemsSolved - a.problemsSolved || a.userId.localeCompare(b.userId));
+    .map((userId) => ({
+      userId,
+      name: nameById.get(userId) as string,
+      ...(totals.get(userId) as { totalScore: number; problemsSolved: number; penaltySeconds: number }),
+    }))
+    // CP tie-breaker: totalScore (desc), problemsSolved (desc), penaltySeconds (asc), userId (asc fallback)
+    .sort(
+      (a, b) =>
+        b.totalScore - a.totalScore ||
+        b.problemsSolved - a.problemsSolved ||
+        a.penaltySeconds - b.penaltySeconds ||
+        a.userId.localeCompare(b.userId),
+    );
 
   return {
     contestId: String(contest._id),
