@@ -50,8 +50,8 @@ const STATUS_COMPILATION_ERROR = 6;
 const RUNTIME_ERROR_STATUS_IDS = new Set([7, 8, 9, 10, 11, 12, 14]);
 const STATUS_INTERNAL_ERROR = 13;
 
-const POLL_INTERVAL_MS = 700;
-const MAX_POLLS = 12;
+export const POLL_INTERVAL_MS = 700;
+export const MAX_POLLS = 12;
 
 // Any non-OK answer from Judge0 — a 429 from the shared public instance, a
 // 5xx, an auth error from a misconfigured JUDGE0_URL — is an infrastructure
