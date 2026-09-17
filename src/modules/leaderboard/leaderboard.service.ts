@@ -94,18 +94,22 @@ export const getGlobalLeaderboard = async ({ page, limit }: { page: number; limi
 // Ranks are computed over the full standings (no skip/limit) so a user far
 // down the list still gets an accurate position — fine at this dataset size.
 export const getMyRank = async (userId: string) => {
-  // 1. Get the user's own totalScore, problemsSolved, and lastSubmitTime
+  // 1. Get the user's own totals and the timestamp used for tie-breaking.
   const userScores = await SubmissionModel.aggregate([
     { $match: { userId: new Types.ObjectId(userId) } },
     ...bestScoresPipeline(),
   ]);
+
   if (!userScores.length) {
     return { rank: null, totalScore: 0, problemsSolved: 0, totalRanked: 0 };
   }
 
-  const { totalScore, problemsSolved, lastSubmitTime } = userScores[0];
+  const { _id, totalScore, problemsSolved, lastSubmitTime } = userScores[0];
+  const normalizedLastSubmitTime = lastSubmitTime ?? new Date(0);
 
-  // 2. Count how many users are ahead of this user directly in MongoDB
+  // 2. Count how many users are strictly ahead of this user in MongoDB, using
+  //    the same ordering as the public leaderboard: score desc, solves desc,
+  //    submit time asc, then ObjectId asc as the last deterministic tie-break.
   const aheadCount = await SubmissionModel.aggregate([
     ...bestScoresPipeline(),
     {
@@ -113,17 +117,31 @@ export const getMyRank = async (userId: string) => {
         $or: [
           { totalScore: { $gt: totalScore } },
           { totalScore: totalScore, problemsSolved: { $gt: problemsSolved } },
-          { totalScore: totalScore, problemsSolved: problemsSolved, lastSubmitTime: { $lt: lastSubmitTime } },
+          {
+            totalScore: totalScore,
+            problemsSolved: problemsSolved,
+            lastSubmitTime: { $lt: normalizedLastSubmitTime },
+          },
+          {
+            totalScore: totalScore,
+            problemsSolved: problemsSolved,
+            lastSubmitTime: normalizedLastSubmitTime,
+            _id: { $lt: new Types.ObjectId(String(_id)) },
+          },
         ],
       },
     },
     { $count: "count" },
   ]);
+
+  const totalRanked = await SubmissionModel.aggregate([...bestScoresPipeline(), { $count: "count" }]);
   const usersAhead = aheadCount[0]?.count ?? 0;
+
   return {
-    rank: usersAhead + 1, // Rank is (Users Ahead + 1)
+    rank: usersAhead + 1,
     totalScore,
     problemsSolved,
+    totalRanked: totalRanked[0]?.count ?? 0,
   };
 };
 
