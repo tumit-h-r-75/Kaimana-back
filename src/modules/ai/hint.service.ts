@@ -172,7 +172,7 @@ ${code?.trim() ? `The learner's current code attempt:\n${code.trim().slice(0, 20
 
 Give exactly one level-${safeLevel} hint.`;
 
-  const aiHint = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 220 });
+  const aiHint = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 700 });
 
   return {
     level: safeLevel,

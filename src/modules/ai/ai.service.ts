@@ -83,6 +83,13 @@ const askGroq = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Promi
         // (uncapped) rather than erroring if the wrong field name is used,
         // which would be a much harder bug to notice than a 400.
         max_completion_tokens: maxTokens,
+        // Every call here wants a short, direct answer — an interview
+        // question, a hint, a complexity verdict. None of them need the
+        // model to deliberate, and deliberation is charged against the same
+        // budget the answer has to come out of. Keeping it low leaves that
+        // budget for text the user actually sees. Ignored by models that do
+        // not reason, so this is safe across the whole GROQ_MODEL range.
+        reasoning_effort: "low",
       }),
     });
 
@@ -97,9 +104,26 @@ const askGroq = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Promi
       choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
     };
 
-    const text = payload.choices?.[0]?.message?.content?.trim();
+    const choice = payload.choices?.[0];
+    const text = choice?.message?.content?.trim();
+
+    // A reasoning model spends part of max_completion_tokens thinking before
+    // it writes anything, and how much varies call to call. Run the budget
+    // out and the visible answer is cut wherever it happened to be — the
+    // mock interviewer was asking questions like "Given an unsorted" and the
+    // candidate saw that as the question. Worse, when reasoning consumed the
+    // lot, content came back empty and the whole feature silently dropped to
+    // its no-AI fallback, which cannot judge an answer at all.
+    //
+    // A half-written answer is not a cheap answer, it is a wrong one, so
+    // this reports failure and lets the caller fall back deliberately.
+    if (choice?.finish_reason === "length") {
+      lastErrorDetail = `Groq: hit the token ceiling before finishing (model: ${GROQ_MODEL}, max_completion_tokens: ${maxTokens})`;
+      return null;
+    }
+
     if (!text) {
-      lastErrorDetail = `Groq returned no text (finish_reason: ${payload.choices?.[0]?.finish_reason ?? "unknown"})`;
+      lastErrorDetail = `Groq returned no text (finish_reason: ${choice?.finish_reason ?? "unknown"})`;
       return null;
     }
 
@@ -160,13 +184,22 @@ const askGemini = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Pro
       }>;
     };
 
-    const text = payload.candidates?.[0]?.content?.parts
+    const candidate = payload.candidates?.[0];
+    const text = candidate?.content?.parts
       ?.map((part) => part.text ?? "")
       .join("")
       .trim();
 
+    // Same trap as Groq above: these models think against the same output
+    // budget, so running out returns a sentence that stops mid-word. Half an
+    // interview question is worse than falling back to a written one.
+    if (candidate?.finishReason === "MAX_TOKENS") {
+      lastErrorDetail = `Gemini: hit the token ceiling before finishing (model: ${GEMINI_MODEL}, maxOutputTokens: ${maxTokens})`;
+      return null;
+    }
+
     if (!text) {
-      lastErrorDetail = `Gemini returned no text (finishReason: ${payload.candidates?.[0]?.finishReason ?? "unknown"})`;
+      lastErrorDetail = `Gemini returned no text (finishReason: ${candidate?.finishReason ?? "unknown"})`;
       return null;
     }
 

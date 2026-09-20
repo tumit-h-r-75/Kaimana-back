@@ -18,6 +18,9 @@ router.delete("/admin/:id", requireAuth, requireAdmin, problemController.deleteP
 // cookie/bearer token is present, so solvedByMe/myBestVerdict can be filled
 // in without forcing a login.
 router.get("/", optionalAuth, problemController.list);
+// Before "/:slug" for the same reason "/admin/*" is: otherwise Express
+// matches "recommended" as a problem slug and returns a 404 for it.
+router.get("/recommended", requireAuth, problemController.recommended);
 router.get("/:slug", optionalAuth, problemController.getBySlug);
 
 // Admin-only authoring.

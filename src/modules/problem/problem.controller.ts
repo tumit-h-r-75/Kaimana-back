@@ -25,6 +25,14 @@ const getBySlug = catchAsync(async (req: AuthenticatedRequest, res) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problem loaded", data: problem });
 });
 
+// GET /api/problems/recommended — what this learner should open next.
+// requireAuth rather than optionalAuth: every part of the answer is derived
+// from their own history, so there is nothing to say to an anonymous caller.
+const recommended = catchAsync(async (req: AuthenticatedRequest, res) => {
+  const result = await problemService.getRecommendations(String(req.user?._id));
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Recommendations loaded", data: result });
+});
+
 const create = catchAsync(async (req: AuthenticatedRequest, res) => {
   const problem = await problemService.createProblem({ ...req.body, createdBy: req.user?._id });
   sendResponse(res, { success: true, statusCode: httpStatus.CREATED, message: "Problem created", data: problem });
@@ -79,6 +87,7 @@ const deleteProblem = catchAsync(async (req, res) => {
 export const problemController = {
   list,
   getBySlug,
+  recommended,
   create,
   update,
   addTestCases,

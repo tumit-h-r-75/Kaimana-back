@@ -288,9 +288,157 @@ const deleteProblem = async (problemId: string) => {
   return problem;
 };
 
+/** How many solves at a difficulty before we start offering the next one up. */
+const READY_TO_LEVEL_UP = 3;
+const DIFFICULTY_ORDER = ["EASY", "MEDIUM", "HARD"] as const;
+type Difficulty = (typeof DIFFICULTY_ORDER)[number];
+
+interface Recommendation {
+  id: string;
+  slug: string;
+  title: string;
+  difficulty: string;
+  tags: string[];
+  basePoints: number;
+}
+
+const summarise = (p: LeanProblem): Recommendation => ({
+  id: String(p._id),
+  slug: p.slug,
+  title: p.title,
+  difficulty: p.difficulty,
+  tags: p.tags ?? [],
+  basePoints: p.basePoints,
+});
+
+/**
+ * Answers "what should I solve next?".
+ *
+ * The library is a list, and a list is a decision. People open it, look at
+ * forty titles, pick something they already know how to do, and leave — the
+ * data to do better than that was always there, it just was not being read.
+ *
+ * Two different suggestions, because they answer different moods:
+ *
+ *  - `resume` is the problem they most recently attempted and did not
+ *    finish. Cheapest possible win: they already have the context loaded.
+ *  - `next` is a problem in their weakest topic, at a difficulty they have
+ *    shown they are ready for. Weakest means fewest solved relative to
+ *    what exists, so a topic they have never touched outranks one they are
+ *    merely slow at.
+ *
+ * Every suggestion carries the sentence explaining it. A recommendation
+ * nobody can see the reasoning behind is just a shuffle.
+ */
+const getRecommendations = async (userId: string) => {
+  const uid = new Types.ObjectId(userId);
+
+  const perProblem = (await SubmissionModel.aggregate([
+    { $match: { userId: uid } },
+    {
+      $group: {
+        _id: "$problemId",
+        solved: { $max: { $cond: [{ $eq: ["$verdict", "ACCEPTED"] }, 1, 0] } },
+        attempts: { $sum: 1 },
+        lastAttemptAt: { $max: "$submittedAt" },
+      },
+    },
+  ])) as { _id: Types.ObjectId; solved: number; attempts: number; lastAttemptAt: Date }[];
+
+  const solvedIds = new Set(perProblem.filter((p) => p.solved).map((p) => String(p._id)));
+  const problems = (await ProblemModel.find({ isPublished: true }).lean()) as unknown as LeanProblem[];
+  const byId = new Map(problems.map((p) => [String(p._id), p]));
+
+  // ---- resume: started, not finished, most recently touched.
+  const unfinished = perProblem
+    .filter((p) => !p.solved && byId.has(String(p._id)))
+    .sort((a, b) => +new Date(b.lastAttemptAt) - +new Date(a.lastAttemptAt))[0];
+
+  const resume = unfinished
+    ? {
+        ...summarise(byId.get(String(unfinished._id))!),
+        attempts: unfinished.attempts,
+        lastAttemptAt: unfinished.lastAttemptAt,
+        reason:
+          unfinished.attempts === 1
+            ? "You started this one and did not finish it."
+            : `You have tried this ${unfinished.attempts} times without an accept yet.`,
+      }
+    : null;
+
+  // ---- difficulty they are ready for: one step past whatever they have
+  // done at least READY_TO_LEVEL_UP of, so the ladder moves but never skips.
+  const solvedByDifficulty = { EASY: 0, MEDIUM: 0, HARD: 0 } as Record<Difficulty, number>;
+  for (const id of solvedIds) {
+    const d = byId.get(id)?.difficulty as Difficulty | undefined;
+    if (d) solvedByDifficulty[d] += 1;
+  }
+  let target: Difficulty = "EASY";
+  for (const d of DIFFICULTY_ORDER) {
+    if (solvedByDifficulty[d] >= READY_TO_LEVEL_UP) {
+      target = DIFFICULTY_ORDER[Math.min(DIFFICULTY_ORDER.indexOf(d) + 1, DIFFICULTY_ORDER.length - 1)];
+    }
+  }
+
+  // ---- weakest tag: fewest solved as a share of what exists. A tag with
+  // nothing solved scores 0 and therefore wins, which is the intent — an
+  // untouched topic is a bigger gap than a half-finished one.
+  const tally = new Map<string, { total: number; solved: number }>();
+  for (const p of problems) {
+    for (const tag of p.tags ?? []) {
+      const t = tally.get(tag) ?? { total: 0, solved: 0 };
+      t.total += 1;
+      if (solvedIds.has(String(p._id))) t.solved += 1;
+      tally.set(tag, t);
+    }
+  }
+  const ranked = [...tally.entries()]
+    .filter(([, t]) => t.solved < t.total)
+    .sort((a, b) => a[1].solved / a[1].total - b[1].solved / b[1].total || b[1].total - a[1].total);
+  const focusTag = ranked[0]?.[0] ?? null;
+
+  // ---- next: unsolved, in the weak tag, at the target difficulty. Relax
+  // the difficulty first and the tag only as a last resort — a slightly
+  // easier problem in the right topic beats the right level in a topic
+  // they have already covered.
+  const unsolved = problems.filter((p) => !solvedIds.has(String(p._id)));
+  const inFocus = focusTag ? unsolved.filter((p) => (p.tags ?? []).includes(focusTag)) : [];
+
+  const chosen =
+    inFocus.find((p) => p.difficulty === target) ??
+    inFocus.sort((a, b) => DIFFICULTY_ORDER.indexOf(a.difficulty as Difficulty) - DIFFICULTY_ORDER.indexOf(b.difficulty as Difficulty))[0] ??
+    unsolved.find((p) => p.difficulty === target) ??
+    unsolved[0];
+
+  const next = chosen
+    ? {
+        ...summarise(chosen),
+        reason:
+          focusTag && (chosen.tags ?? []).includes(focusTag)
+            ? tally.get(focusTag)!.solved === 0
+              ? `You have not solved a ${focusTag} problem yet.`
+              : `${focusTag} is your thinnest topic so far — ${tally.get(focusTag)!.solved} of ${tally.get(focusTag)!.total} solved.`
+            : "Next one up from what you have already done.",
+      }
+    : null;
+
+  return {
+    resume,
+    next,
+    focusTag,
+    stats: {
+      solved: solvedIds.size,
+      attempted: perProblem.length,
+      solvedByDifficulty,
+      readyFor: target,
+    },
+  };
+};
+
 export const problemService = {
   listProblems,
   getProblemBySlug,
+  getRecommendations,
   createProblem,
   updateProblem,
   getProblemForJudging,

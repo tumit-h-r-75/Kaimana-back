@@ -128,7 +128,7 @@ Empirical space fit: ${spaceFit ? `slope ${spaceFit.slope}, R² ${spaceFit.rSqua
 
 Explain this result to the learner.`;
 
-  const aiExplanation = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 260 });
+  const aiExplanation = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 700 });
   const explanation = aiExplanation ?? buildFallbackExplanation(timeFit, spaceFit, structural, timeComplexity, spaceComplexity, confidence);
 
   const report: IComplexityReport = {

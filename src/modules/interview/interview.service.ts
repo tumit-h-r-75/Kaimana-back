@@ -182,7 +182,7 @@ const startSession = async (
   { topic, difficulty, totalQuestions }: { topic: string; difficulty: Difficulty; totalQuestions?: number },
 ) => {
   const prompt = `Topic: ${topic}\nDifficulty: ${difficulty}\n\nAsk the candidate their opening interview question now.`;
-  const aiQuestion = await askAi({ system: OPENING_SYSTEM_PROMPT, prompt, maxTokens: 200 });
+  const aiQuestion = await askAi({ system: OPENING_SYSTEM_PROMPT, prompt, maxTokens: 600 });
   const question = aiQuestion ?? pickOpeningQuestion(topic);
 
   const session = await InterviewSessionModel.create({
@@ -214,7 +214,7 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
     // maxTokens raised from 220: the prompt now requires an explicit
     // correctness evaluation before the follow-up question, not just the
     // question alone.
-    const aiFollowUp = await askAi({ system: FOLLOW_UP_SYSTEM_PROMPT, prompt, maxTokens: 320 });
+    const aiFollowUp = await askAi({ system: FOLLOW_UP_SYSTEM_PROMPT, prompt, maxTokens: 900 });
     const followUp = aiFollowUp ?? pickFollowUpQuestion(session.topic, candidateTurns);
     session.messages.push({ role: "interviewer", content: followUp, createdAt: new Date() });
     await session.save();
@@ -222,7 +222,7 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
   }
 
   const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nFull conversation:\n${transcriptFor(session.messages)}\n\nGive your closing feedback and score now.`;
-  const aiFeedback = await askAi({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 300 });
+  const aiFeedback = await askAi({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 900 });
   const feedback = aiFeedback ?? fallbackClosingFeedback();
   const score = aiFeedback ? parseScore(aiFeedback) : undefined;
 
