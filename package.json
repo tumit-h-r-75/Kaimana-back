@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "axios": "^1.19.0",
@@ -33,5 +34,8 @@
     "@types/node": "^26.2.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

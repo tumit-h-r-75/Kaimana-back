@@ -1,0 +1,18 @@
+// Typecheck-only config.
+//
+// tsconfig.json exists to emit dist/, so its rootDir is ./src and api/ falls
+// outside it — which meant the file Vercel actually runs, api/index.ts, was
+// never typechecked. Any error in it surfaced as a failed deploy rather than
+// a failed build.
+//
+// This config checks both trees and emits nothing, so `npm run build` keeps
+// producing exactly the same dist/ layout that `npm start` expects.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "api/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
