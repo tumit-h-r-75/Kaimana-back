@@ -17,6 +17,8 @@ import { testCaseService } from "../problem/testcase.service.js";
 import { gemsService } from "./gems.service.js";
 import { judgeSubmission } from "./judge.service.js";
 import { runService } from "./run.service.js";
+import { traceService } from "./trace.service.js";
+import { config } from "../../config/env.js";
 import { getIO } from "../../sockets/index.js";
 import { getContestRoom, GLOBAL_LEADERBOARD_ROOM } from "../../sockets/handlers.js";
 import { leaderboardService } from "../leaderboard/leaderboard.service.js";
@@ -30,14 +32,27 @@ const UNSUPPORTED_LANGUAGE_MESSAGE = "Unsupported language. Use python, cpp, jav
 const RUNS_PER_MINUTE = 10;
 const recentExecutions = new Map<string, number[]>();
 
+// A traced run costs far more judge time than a plain one, so it gets its
+// own, tighter budget rather than sharing the Run button's.
+const TRACES_PER_MINUTE = 4;
+const recentTraces = new Map<string, number[]>();
+
+/** Shared sliding-window check; returns false when the caller is over budget. */
+const withinRateLimit = (bucket: Map<string, number[]>, userId: string, limit: number) => {
+  const now = Date.now();
+  const recent = (bucket.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (recent.length >= limit) return false;
+  bucket.set(userId, [...recent, now]);
+  return true;
+};
+
 // POST /api/submissions/execute — the workspace's "Run" button: runs the code
 // on the problem's sample tests (or custom stdin) and reports each result.
 const execute = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
-  const now = Date.now();
-  const requests = (recentExecutions.get(userId) ?? []).filter((time) => now - time < 60_000);
-  if (requests.length >= RUNS_PER_MINUTE) throw new AppError("Run limit reached. Try again in a minute.", 429);
-  recentExecutions.set(userId, [...requests, now]);
+  if (!withinRateLimit(recentExecutions, userId, RUNS_PER_MINUTE)) {
+    throw new AppError("Run limit reached. Try again in a minute.", 429);
+  }
 
   const { language, source, stdin, problemId } = (req.body ?? {}) as Record<string, unknown>;
   if (!isJudgeLanguage(language)) throw new AppError(UNSUPPORTED_LANGUAGE_MESSAGE, 400);
@@ -59,6 +74,26 @@ const execute = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
     canSeeUnpublished: req.user?.role === "admin",
   });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Code executed", data: result });
+});
+
+// POST /api/submissions/visualise — Execution Visualizer. Re-runs the code
+// under a tracing harness and returns what each line did, for the timeline in
+// the workspace. Never called as part of a normal run or submission.
+const visualise = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  if (!config.executionVisualizerEnabled) throw new AppError("The execution visualizer is not enabled.", 404);
+
+  const userId = String(req.user?._id);
+  if (!withinRateLimit(recentTraces, userId, TRACES_PER_MINUTE)) {
+    throw new AppError("Visualise limit reached. Try again in a minute.", 429);
+  }
+
+  const { language, source } = (req.body ?? {}) as Record<string, unknown>;
+  if (!isJudgeLanguage(language)) throw new AppError(UNSUPPORTED_LANGUAGE_MESSAGE, 400);
+  if (typeof source !== "string" || !source.trim()) throw new AppError("Write some code before visualising it.", 400);
+  if (source.length > MAX_CODE_LENGTH) throw new AppError("Code is outside the allowed size limit.", 400);
+
+  const result = await traceService.traceExecution({ language, source });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Execution traced", data: result });
 });
 
 // Every submission fans out to one Judge0 run per test case on the shared
@@ -235,4 +270,4 @@ const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Submissions loaded", data: { items, total, page: safePage, limit: safeLimit } });
 });
 
-export const submissionController = { execute, submit, getById, list };
+export const submissionController = { execute, visualise, submit, getById, list };

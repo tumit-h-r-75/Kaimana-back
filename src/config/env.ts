@@ -47,6 +47,10 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: optionalString,
   CLOUDINARY_API_KEY: optionalString,
   CLOUDINARY_API_SECRET: optionalString,
+  // Execution Visualizer. Off unless explicitly enabled: a traced run is a
+  // whole extra Judge0 submission that runs far slower than the plain one,
+  // and the default judge is a shared public instance.
+  FEATURE_EXECUTION_VISUALIZER: z.enum(["true", "false"]).default("false"),
   JWT_ACCESS_SECRET: z.string().min(1, "JWT_ACCESS_SECRET is required"),
   JWT_REFRESH_SECRET: z.string().min(1, "JWT_REFRESH_SECRET is required"),
   JWT_ACCESS_EXPIRES_IN: z.string().min(1, "JWT_ACCESS_EXPIRES_IN is required"),
@@ -82,6 +86,7 @@ export const config = {
   cloudinaryCloudName: env.CLOUDINARY_CLOUD_NAME,
   cloudinaryApiKey: env.CLOUDINARY_API_KEY,
   cloudinaryApiSecret: env.CLOUDINARY_API_SECRET,
+  executionVisualizerEnabled: env.FEATURE_EXECUTION_VISUALIZER === "true",
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
   jwtRefreshSecret: env.JWT_REFRESH_SECRET,
   jwtAccessExpiresIn: env.JWT_ACCESS_EXPIRES_IN,
