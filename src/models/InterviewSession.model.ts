@@ -2,10 +2,34 @@
 
 import mongoose, { model, Schema, Types } from "mongoose";
 
+/** How the interviewer judged the answer it was replying to. */
+export type InterviewVerdict = "correct" | "partial" | "incorrect";
+
 export interface IInterviewMessage {
   role: "interviewer" | "candidate";
+  /** The question, or the candidate's answer. Never the assessment. */
   content: string;
+  /**
+   * Set on interviewer turns that followed an answer. Splitting it out of
+   * `content` is what lets the transcript show a verdict beside the answer
+   * it belongs to, and what makes "which questions did they get right"
+   * answerable without re-reading prose.
+   */
+  verdict?: InterviewVerdict;
+  assessment?: string;
   createdAt: Date;
+}
+
+/**
+ * The closing score, broken into the things an interview is actually
+ * judged on. A single number out of ten tells a candidate nothing they can
+ * act on; four tells them which one to work on.
+ */
+export interface IInterviewRubric {
+  correctness: number;
+  approach: number;
+  complexity: number;
+  communication: number;
 }
 
 export interface IInterviewSession {
@@ -22,6 +46,7 @@ export interface IInterviewSession {
   messages: IInterviewMessage[];
   feedback?: string;
   score?: number;
+  rubric?: IInterviewRubric;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,6 +55,8 @@ const interviewMessageSchema = new Schema<IInterviewMessage>(
   {
     role: { type: String, enum: ["interviewer", "candidate"], required: true },
     content: { type: String, required: true },
+    verdict: { type: String, enum: ["correct", "partial", "incorrect"] },
+    assessment: { type: String },
     createdAt: { type: Date, default: Date.now },
   },
   { _id: false },
@@ -45,6 +72,12 @@ const interviewSessionSchema = new Schema<IInterviewSession>(
     messages: { type: [interviewMessageSchema], default: [] },
     feedback: { type: String },
     score: { type: Number, min: 0, max: 10 },
+    rubric: {
+      correctness: { type: Number, min: 0, max: 10 },
+      approach: { type: Number, min: 0, max: 10 },
+      complexity: { type: Number, min: 0, max: 10 },
+      communication: { type: Number, min: 0, max: 10 },
+    },
   },
   { timestamps: true },
 );

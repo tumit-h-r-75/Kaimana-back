@@ -127,25 +127,81 @@ Rules you must always follow:
 - Match the requested topic and difficulty.
 - Do not answer your own question, and do not include any preamble like "Sure!" — output only the question.`;
 
+// Both of these ask for JSON rather than prose. The judgement used to be
+// glued to the front of the next question in one blob, which meant the
+// verdict on an answer could not be stored beside that answer, could not be
+// shown apart from the question, and could not be counted — "how many did
+// they get right" was unanswerable without re-reading the transcript.
 const FOLLOW_UP_SYSTEM_PROMPT = `You are Kaimana's AI mock interviewer, continuing a live mock coding interview.
-Rules you must always follow:
-- FIRST, explicitly evaluate the candidate's last answer in 1-2 sentences: clearly say whether it was correct, partially correct, or incorrect/off-topic, and briefly why. Do this every single turn, even for a short, vague, wrong, or nonsense answer — never skip straight to the next question without judging the last one.
-- If the answer was incorrect, incomplete, or missed the point, briefly state what the correct idea actually is at a conceptual level (not full code) before moving on.
-- THEN ask exactly ONE natural follow-up question, or probe deeper on the weak point you just identified.
-- Keep the whole response (evaluation + question) to 3-6 sentences total.
-- Never solve the problem for the candidate beyond the brief correction above, and never reveal full code.
-- Stay encouraging but honest and rigorous, like a real technical interviewer — do not praise or wave through an answer that was actually wrong.
-- Output only the evaluation followed by the question/probe, no preamble like "Sure!" or "Great question!".`;
+
+Reply with ONLY a JSON object, no markdown fence, in exactly this shape:
+{"verdict":"correct"|"partial"|"incorrect","assessment":"...","question":"..."}
+
+Rules:
+- "verdict" judges the candidate's LAST answer. Judge every answer, including short, vague, wrong or nonsense ones. Never default to "correct" to be kind.
+- "assessment" is 1-3 sentences saying why, in plain language. If the answer was wrong or incomplete, state what the right idea actually is at a conceptual level — never full code.
+- "question" is exactly ONE new question, or a deeper probe on the weakness you just named. 1-3 sentences.
+- Be encouraging but rigorous, like a real interviewer. Do not wave through an answer that was wrong.
+- No preamble, no trailing commentary, no code fences. JSON only.`;
 
 const CLOSING_SYSTEM_PROMPT = `You are Kaimana's AI mock interviewer, wrapping up a mock coding interview.
-Rules you must always follow:
-- Give a brief, constructive 3-5 sentence summary of the candidate's performance across the conversation: strengths, and one or two areas to improve.
-- Ground it in what actually happened — refer to specific answers the candidate got right or wrong during the conversation, not generic advice that could apply to anyone.
-- Be encouraging but honest — if several answers were wrong, the summary and score must reflect that, not soften it.
-- End your response with a final line, on its own, in exactly this format: "Score: N/10" where N is an integer from 0 to 10.`;
 
+Reply with ONLY a JSON object, no markdown fence, in exactly this shape:
+{"summary":"...","rubric":{"correctness":N,"approach":N,"complexity":N,"communication":N},"overall":N}
+
+Rules:
+- Every N is an integer from 0 to 10.
+- "summary" is 3-5 sentences grounded in what actually happened: refer to specific answers this candidate got right or wrong. No generic advice that would fit anyone.
+- "correctness" is whether the answers were right. "approach" is how they reasoned toward them. "complexity" is whether they discussed time and space cost. "communication" is how clearly they explained themselves.
+- "overall" reflects the four. If several answers were wrong, it must be low — do not soften it.
+- No preamble, no code fences. JSON only.`;
+
+/**
+ * The conversation as the model sees it on the next turn.
+ *
+ * Past judgements are included, not just the questions. Without them the
+ * model re-reads a transcript of bare questions and answers and has to
+ * re-derive what it already decided, which is how a closing summary ends
+ * up contradicting the verdicts given during the interview.
+ */
 const transcriptFor = (messages: IInterviewMessage[]): string =>
-  messages.map((m) => `${m.role === "interviewer" ? "Interviewer" : "Candidate"}: ${m.content}`).join("\n\n");
+  messages
+    .map((m) => {
+      if (m.role === "candidate") return `Candidate: ${m.content}`;
+      const judged = m.verdict ? ` [you judged the previous answer: ${m.verdict}${m.assessment ? ` — ${m.assessment}` : ""}]` : "";
+      return `Interviewer:${judged} ${m.content}`;
+    })
+    .join("\n\n");
+
+/**
+ * Pulls a JSON object out of a model reply.
+ *
+ * Models fence JSON in ```json blocks about as often as they do not, and
+ * occasionally add a sentence either side of it, whatever the prompt says.
+ * Slicing from the first brace to the last is cheap and survives both.
+ * Returns null rather than throwing, so every caller can fall back to the
+ * prose path it had before.
+ */
+const extractJson = <T>(raw: string | null): T | null => {
+  if (!raw) return null;
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    return JSON.parse(raw.slice(start, end + 1)) as T;
+  } catch {
+    return null;
+  }
+};
+
+const VERDICTS = new Set(["correct", "partial", "incorrect"]);
+
+/** Clamps a model-supplied rubric figure into the 0-10 the schema allows. */
+const clampScore = (value: unknown): number | undefined => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(Math.max(Math.round(n), 0), 10);
+};
 
 const parseScore = (feedback: string): number | undefined => {
   const match = feedback.match(/score\s*:\s*(\d+(?:\.\d+)?)\s*\/\s*10/i);
@@ -210,25 +266,63 @@ const respond = async (userId: string, sessionId: string, answer: string) => {
   const totalQuestions = session.totalQuestions ?? DEFAULT_TOTAL_QUESTIONS;
 
   if (candidateTurns < totalQuestions) {
-    const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nConversation so far:\n${transcriptFor(session.messages)}\n\nAsk your next question or probe now.`;
-    // maxTokens raised from 220: the prompt now requires an explicit
-    // correctness evaluation before the follow-up question, not just the
-    // question alone.
-    const aiFollowUp = await askAi({ system: FOLLOW_UP_SYSTEM_PROMPT, prompt, maxTokens: 900 });
-    const followUp = aiFollowUp ?? pickFollowUpQuestion(session.topic, candidateTurns);
-    session.messages.push({ role: "interviewer", content: followUp, createdAt: new Date() });
+    const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nConversation so far:\n${transcriptFor(session.messages)}\n\nJudge the last answer and ask your next question now.`;
+    // The budget covers a judgement, a correction and a question, and the
+    // model's own reasoning is charged against the same number.
+    const raw = await askAi({ system: FOLLOW_UP_SYSTEM_PROMPT, prompt, maxTokens: 900 });
+    const parsed = extractJson<{ verdict?: string; assessment?: string; question?: string }>(raw);
+
+    if (parsed?.question) {
+      session.messages.push({
+        role: "interviewer",
+        content: parsed.question.trim(),
+        // Only trust a verdict the model actually gave us one of. Anything
+        // else is left unset rather than guessed at — an invented "correct"
+        // on the transcript is worse than a missing one.
+        verdict: VERDICTS.has(String(parsed.verdict)) ? (parsed.verdict as IInterviewMessage["verdict"]) : undefined,
+        assessment: parsed.assessment?.trim() || undefined,
+        createdAt: new Date(),
+      });
+    } else {
+      // Either no AI, or a reply we could not read. Both fall through to the
+      // written bank, which says plainly that it could not grade the answer
+      // rather than skipping silently past it.
+      session.messages.push({
+        role: "interviewer",
+        content: raw?.trim() || pickFollowUpQuestion(session.topic, candidateTurns),
+        createdAt: new Date(),
+      });
+    }
     await session.save();
     return session;
   }
 
-  const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nFull conversation:\n${transcriptFor(session.messages)}\n\nGive your closing feedback and score now.`;
-  const aiFeedback = await askAi({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 900 });
-  const feedback = aiFeedback ?? fallbackClosingFeedback();
-  const score = aiFeedback ? parseScore(aiFeedback) : undefined;
+  const prompt = `Topic: ${session.topic}\nDifficulty: ${session.difficulty}\n\nFull conversation:\n${transcriptFor(session.messages)}\n\nGive your closing assessment now.`;
+  const raw = await askAi({ system: CLOSING_SYSTEM_PROMPT, prompt, maxTokens: 900 });
+  const parsed = extractJson<{ summary?: string; overall?: unknown; rubric?: Record<string, unknown> }>(raw);
+
+  const feedback = parsed?.summary?.trim() || raw?.trim() || fallbackClosingFeedback();
+  // Prefer the structured figure; fall back to scraping "Score: N/10" out of
+  // prose, which is what older sessions and a non-JSON reply still look like.
+  const score = clampScore(parsed?.overall) ?? (raw ? parseScore(raw) : undefined);
+
+  const rubric = parsed?.rubric
+    ? {
+        correctness: clampScore(parsed.rubric.correctness),
+        approach: clampScore(parsed.rubric.approach),
+        complexity: clampScore(parsed.rubric.complexity),
+        communication: clampScore(parsed.rubric.communication),
+      }
+    : undefined;
 
   session.status = "completed";
   session.feedback = feedback;
   if (score !== undefined) session.score = score;
+  // Only store a rubric where every dimension came back a number; a partial
+  // one would render as a chart with silent gaps in it.
+  if (rubric && Object.values(rubric).every((v) => v !== undefined)) {
+    session.rubric = rubric as Required<typeof rubric>;
+  }
   session.messages.push({ role: "interviewer", content: feedback, createdAt: new Date() });
 
   await session.save();
