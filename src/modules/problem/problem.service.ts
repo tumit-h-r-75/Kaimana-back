@@ -136,6 +136,16 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
     myBestVerdict,
     myHintTier,
     myHintPenaltyPercent,
+    // Withheld until the learner has solved it themselves — before that it
+    // is the answer key. Afterwards it is the thing they actually came for:
+    // something to compare their own approach against, which the hints
+    // deliberately never give. Without it, anyone who is stuck and out of
+    // gems reaches a dead end and simply leaves.
+    //
+    // The lean() above skips the toJSON transform that normally strips this
+    // field, so the value is already in hand; that transform still guards
+    // every path which serialises a Problem document directly.
+    referenceSolution: myBestVerdict === "ACCEPTED" ? (problem.referenceSolution ?? null) : null,
   };
 };
 
