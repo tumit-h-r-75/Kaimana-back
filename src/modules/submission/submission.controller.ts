@@ -9,6 +9,8 @@ import { AppError } from "../../utils/errors.js";
 import { computeScore } from "../../utils/scoring.js";
 import { gemsForDifficulty } from "../../utils/gems.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
+import { ProblemModel } from "../../models/Problem.model.js";
+import { LANGUAGE_ALIASES, toSearchRegex } from "../../utils/search.js";
 import { UserModel } from "../../models/User.model.js";
 import { HintUnlockModel, type IHintUnlock } from "../../models/HintUnlock.model.js";
 import { contestService } from "../contest/contest.service.js";
@@ -237,13 +239,40 @@ const getById = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Submission loaded", data: submission });
 });
 
+const VERDICTS = [
+  "PENDING",
+  "RUNNING",
+  "ACCEPTED",
+  "WRONG_ANSWER",
+  "TIME_LIMIT_EXCEEDED",
+  "MEMORY_LIMIT_EXCEEDED",
+  "RUNTIME_ERROR",
+  "COMPILATION_ERROR",
+] as const;
+
+type ProblemRef = { id: string; title: string; slug: string; difficulty: string };
+
 const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const { problemId, page, limit } = req.query;
+  const { problemId, page, limit, verdict, search } = req.query;
   const filter: Record<string, unknown> = { userId: req.user?._id };
   if (problemId) {
     // A repeated ?problemId=a&problemId=b arrives as an array, not a string.
     if (typeof problemId !== "string" || !Types.ObjectId.isValid(problemId)) throw new AppError("problemId is not a valid id.", 400);
     filter.problemId = problemId;
+  }
+  if (verdict !== undefined) {
+    if (typeof verdict !== "string" || !(VERDICTS as readonly string[]).includes(verdict)) throw new AppError("verdict is not a valid verdict.", 400);
+    filter.verdict = verdict;
+  }
+  // Search matches a problem's title, or — when the whole query is a
+  // language's name (python, c++, ts…) — the language.
+  if (typeof search === "string" && search.trim()) {
+    const text = search.trim();
+    const problemIds = await ProblemModel.distinct("_id", { title: { $regex: toSearchRegex(text), $options: "i" } });
+    const matches: Record<string, unknown>[] = [{ problemId: { $in: problemIds } }];
+    const language = LANGUAGE_ALIASES[text.toLowerCase()];
+    if (language) matches.push({ language });
+    filter.$or = matches;
   }
 
   // Non-numeric, zero, negative or fractional page/limit values fall back to
@@ -256,7 +285,17 @@ const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const safeLimit = toPositiveInt(limit, 20, 100);
   const safePage = toPositiveInt(page, 1, 1_000_000);
 
-  const [items, total] = await Promise.all([
+  // The history page's summary counts every verdict across the whole
+  // history, whatever filter is applied; a single problem's panel in the
+  // workspace has no use for them and skips the extra query.
+  const countsQuery = problemId
+    ? Promise.resolve(null)
+    : SubmissionModel.aggregate<{ _id: string; count: number }>([
+        { $match: { userId: new Types.ObjectId(String(req.user?._id)) } },
+        { $group: { _id: "$verdict", count: { $sum: 1 } } },
+      ]);
+
+  const [docs, total, verdictCounts] = await Promise.all([
     SubmissionModel.find(filter)
       .select("problemId language verdict passedTests totalTests runtimeMs score createdAt")
       // _id breaks createdAt ties so an item never repeats on, or vanishes
@@ -265,9 +304,35 @@ const list = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit),
     SubmissionModel.countDocuments(filter),
+    countsQuery,
   ]);
 
-  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Submissions loaded", data: { items, total, page: safePage, limit: safeLimit } });
+  // Each row names its problem. problemId stays the plain id every existing
+  // caller reads; the title rides alongside in `problem`, fetched in one
+  // query for the whole page.
+  const problemIds = [...new Set(docs.map((doc: { problemId: unknown }) => String(doc.problemId)))];
+  const problems = (await ProblemModel.find({ _id: { $in: problemIds } }).select("title slug difficulty").lean()) as unknown as {
+    _id: Types.ObjectId;
+    title: string;
+    slug: string;
+    difficulty: string;
+  }[];
+  const problemById = new Map<string, ProblemRef>(
+    problems.map((p) => [String(p._id), { id: String(p._id), title: p.title, slug: p.slug, difficulty: p.difficulty }]),
+  );
+  const items = docs.map((doc: { problemId: unknown; toJSON: () => Record<string, unknown> }) => ({
+    ...doc.toJSON(),
+    problem: problemById.get(String(doc.problemId)) ?? null,
+  }));
+
+  const counts = verdictCounts ? Object.fromEntries(verdictCounts.map((entry) => [entry._id, entry.count])) : undefined;
+
+  sendResponse(res, {
+    success: true,
+    statusCode: httpStatus.OK,
+    message: "Submissions loaded",
+    data: { items, total, page: safePage, limit: safeLimit, ...(counts ? { counts } : {}) },
+  });
 });
 
 export const submissionController = { execute, visualise, submit, getById, list };
