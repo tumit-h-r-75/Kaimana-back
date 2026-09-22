@@ -350,7 +350,7 @@ const listSessions = async (userId: string) => {
   const sessions = await InterviewSessionModel.find({ userId })
     .sort({ createdAt: -1 })
     .limit(50)
-    .select("topic difficulty totalQuestions status score createdAt messages")
+    .select("topic difficulty totalQuestions status score createdAt updatedAt messages")
     .lean<(IInterviewSession & { _id: Types.ObjectId })[]>();
 
   // Joins each completed session against its (much lighter) AIReport row
@@ -380,6 +380,8 @@ const listSessions = async (userId: string) => {
       status: s.status,
       score: s.score,
       createdAt: s.createdAt,
+      // For a completed session, the moment it finished — how long it took.
+      updatedAt: (s as { updatedAt?: Date }).updatedAt,
       messageCount: s.messages?.length ?? 0,
       reportSummary,
     };
