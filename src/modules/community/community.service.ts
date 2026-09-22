@@ -9,12 +9,15 @@ import { Types } from "mongoose";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ReviewModel } from "../../models/Review.model.js";
 import { ContestModel } from "../../models/Contest.model.js";
+import { ProblemModel } from "../../models/Problem.model.js";
+import { UserModel } from "../../models/User.model.js";
 import { AppError } from "../../utils/errors.js";
+import { toSearchRegex } from "../../utils/search.js";
 
 const NOT_FOUND_MESSAGE = "This submission isn't available in the community.";
 
 type PopulatedAuthor = { _id: unknown; name: string; profilePicUrl?: string } | null | undefined;
-type PopulatedProblem = { _id: unknown; title: string; slug: string; difficulty: string } | null | undefined;
+type PopulatedProblem = { _id: unknown; title: string; slug: string; difficulty: string; tags?: string[] } | null | undefined;
 
 const toAuthor = (userId: PopulatedAuthor) => {
   if (!userId || typeof userId !== "object") return null;
@@ -23,7 +26,14 @@ const toAuthor = (userId: PopulatedAuthor) => {
 
 const toProblem = (problemId: PopulatedProblem) => {
   if (!problemId || typeof problemId !== "object") return null;
-  return { id: String(problemId._id), title: problemId.title, slug: problemId.slug, difficulty: problemId.difficulty };
+  return {
+    id: String(problemId._id),
+    title: problemId.title,
+    slug: problemId.slug,
+    difficulty: problemId.difficulty,
+    // Only populated on the feed, where a card picks its icon from them.
+    ...(problemId.tags ? { tags: problemId.tags } : {}),
+  };
 };
 
 // Shared shape for a feed card and a detail page's summary section.
@@ -59,18 +69,53 @@ const getCommunityVisibleFilter = async () => {
   };
 };
 
-export const getFeed = async ({ page, limit }: { page: number; limit: number }) => {
+export type FeedSort = "newest" | "oldest" | "fastest";
+
+export interface FeedQuery {
+  page: number;
+  limit: number;
+  /** Matched against the problem's title and the solver's name. */
+  search?: string;
+  difficulty?: "EASY" | "MEDIUM" | "HARD";
+  language?: "python" | "cpp" | "javascript" | "typescript";
+  sort?: FeedSort;
+}
+
+const SORTS: Record<FeedSort, Record<string, 1 | -1>> = {
+  newest: { createdAt: -1, _id: -1 },
+  oldest: { createdAt: 1, _id: 1 },
+  fastest: { runtimeMs: 1, createdAt: -1, _id: -1 },
+};
+
+export const getFeed = async ({ page, limit, search, difficulty, language, sort = "newest" }: FeedQuery) => {
   const skip = (page - 1) * limit;
   const visibleFilter = await getCommunityVisibleFilter();
 
+  // The visibility rule already constrains problemId, so every narrowing is
+  // added under $and rather than merged into the same keys.
+  const conditions: Record<string, unknown>[] = [visibleFilter];
+  if (difficulty) {
+    conditions.push({ problemId: { $in: await ProblemModel.distinct("_id", { difficulty }) } });
+  }
+  if (language) conditions.push({ language });
+  if (search?.trim()) {
+    const pattern = { $regex: toSearchRegex(search), $options: "i" };
+    const [problemIds, userIds] = await Promise.all([
+      ProblemModel.distinct("_id", { title: pattern }),
+      UserModel.distinct("_id", { name: pattern }),
+    ]);
+    conditions.push({ $or: [{ problemId: { $in: problemIds } }, { userId: { $in: userIds } }] });
+  }
+  const filter = conditions.length === 1 ? visibleFilter : { $and: conditions };
+
   const [submissions, total] = await Promise.all([
-    SubmissionModel.find(visibleFilter)
-      .sort({ createdAt: -1 })
+    SubmissionModel.find(filter)
+      .sort(SORTS[sort])
       .skip(skip)
       .limit(limit)
       .populate("userId", "name profilePicUrl")
-      .populate("problemId", "title slug difficulty"),
-    SubmissionModel.countDocuments(visibleFilter),
+      .populate("problemId", "title slug difficulty tags"),
+    SubmissionModel.countDocuments(filter),
   ]);
 
   const items = await Promise.all(

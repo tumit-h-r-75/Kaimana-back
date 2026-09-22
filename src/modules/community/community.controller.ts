@@ -7,12 +7,28 @@ import { sendResponse } from "../../utils/response.js";
 import { communityService } from "./community.service.js";
 import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
 
+const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
+const LANGUAGES = ["python", "cpp", "javascript", "typescript"] as const;
+const SORTS = ["newest", "oldest", "fastest"] as const;
+
+// An unknown value is ignored rather than rejected: these come from a
+// shareable URL, and a stale link should still show the feed.
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined =>
+  typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
+
 const feed = catchAsync(async (req: AuthenticatedRequest, res) => {
-  const { page, limit } = req.query as Record<string, string>;
+  const { page, limit, search, difficulty, language, sort } = req.query;
   const safePage = Math.max(Number(page) || 1, 1);
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
 
-  const result = await communityService.getFeed({ page: safePage, limit: safeLimit });
+  const result = await communityService.getFeed({
+    page: safePage,
+    limit: safeLimit,
+    search: typeof search === "string" ? search : undefined,
+    difficulty: oneOf(difficulty, DIFFICULTIES),
+    language: oneOf(language, LANGUAGES),
+    sort: oneOf(sort, SORTS),
+  });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Community feed loaded", data: result });
 });
 
