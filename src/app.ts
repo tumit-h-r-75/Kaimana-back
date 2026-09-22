@@ -20,6 +20,7 @@ import { communityRouter } from "./modules/community/community.route.js";
 import { hostRequestRouter } from "./modules/host/host.route.js";
 import { kidsRouter } from "./modules/kids/kids.route.js";
 import { proposalRouter } from "./modules/proposal/proposal.route.js";
+import { notificationRouter } from "./modules/notification/notification.route.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
@@ -82,6 +83,7 @@ app.use("/api/community", communityRouter);
 app.use("/api/host-requests", hostRequestRouter);
 app.use("/api/kids", kidsRouter);
 app.use("/api/proposals", proposalRouter);
+app.use("/api/notifications", notificationRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);

@@ -19,6 +19,9 @@ export interface IUser {
   // incrementing this (e.g. on password change) invalidates every token
   // signed before it.
   tokenVersion: number;
+  // When the user last opened their notifications; anything newer counts
+  // as unread (see models/Notification.model.ts).
+  notificationsSeenAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -73,6 +76,10 @@ const userSchema = new Schema<IUser>(
     tokenVersion: {
       type: Number,
       default: 0,
+    },
+
+    notificationsSeenAt: {
+      type: Date,
     },
   },
   {
