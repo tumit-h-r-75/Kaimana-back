@@ -6,6 +6,7 @@ import { FilterQuery, Types } from "mongoose";
 import { HostRequestModel, type HostRequestStatus, type IHostRequest } from "../../models/HostRequest.model.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
 import { AppError } from "../../utils/errors.js";
+import { notificationService } from "../notification/notification.service.js";
 
 // Same loose `mongoose.models.X || model(...)` union as every other model, so
 // .lean() results need an explicit cast (see contest.service.ts).
@@ -151,6 +152,12 @@ const createRequest = async (userId: string, payload: unknown) => {
       contactEmail: contactEmail ?? user.email,
       message,
     });
+    await notificationService.notifyAdmins({
+      type: "host.requested",
+      title: "New host request",
+      body: `"${contestTitle}" is waiting for review.`,
+      href: "/admin/host-requests",
+    });
     return toHostRequestDto(created.toObject() as unknown as LeanHostRequest);
   } catch (error) {
     // Two submissions that both got past the exists() check above — the
@@ -259,6 +266,23 @@ const reviewRequest = async (requestId: string, reviewerId: string, payload: unk
       throw error;
     }
   }
+
+  await notificationService.notifyUser(
+    request.userId,
+    action === "approve"
+      ? {
+          type: "host.approved",
+          title: "You can host contests now",
+          body: `Your request to run "${request.contestTitle}" was approved.${note ? ` ${note}` : ""}`,
+          href: "/admin/contests",
+        }
+      : {
+          type: "host.rejected",
+          title: "Your host request was declined",
+          body: `"${request.contestTitle}"${note ? ` — ${note}` : ""}`,
+          href: "/host",
+        },
+  );
 
   const user = (await UserModel.findById(request.userId).select("name email role").lean()) as unknown as LeanRequestUser | null;
   return toHostRequestDto(reviewed, user);

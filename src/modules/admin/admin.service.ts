@@ -6,6 +6,7 @@ import { ProblemModel } from "../../models/Problem.model.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ContestModel } from "../../models/Contest.model.js";
 import { AppError } from "../../utils/errors.js";
+import { notificationService } from "../notification/notification.service.js";
 
 type LeanUser = IUser & { _id: Types.ObjectId };
 
@@ -120,6 +121,24 @@ const updateUser = async (targetUserId: string, requestingUserId: string, payloa
     "name email role status profilePicUrl createdAt",
   );
   if (!user) throw new AppError("User not found.", 404);
+
+  // The person whose account changed hears about it. A block needs no
+  // message — they can no longer sign in to read one.
+  if (payload.role) {
+    const byRole = {
+      admin: { title: "You're now an admin", body: "You can manage every problem, contest and account.", href: "/admin" },
+      guest: { title: "You can host contests now", body: "The contest manager is open to you.", href: "/admin/contests" },
+      user: { title: "Your role changed", body: "Your account is a regular learner account now.", href: "/profile" },
+    } as const;
+    await notificationService.notifyUser(targetUserId, { type: "role.changed", ...byRole[payload.role] });
+  } else if (payload.status === "active") {
+    await notificationService.notifyUser(targetUserId, {
+      type: "role.changed",
+      title: "Your account is active again",
+      body: "Welcome back — everything is open to you.",
+      href: "/problems",
+    });
+  }
   return user;
 };
 

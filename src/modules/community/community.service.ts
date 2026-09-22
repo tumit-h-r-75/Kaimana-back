@@ -13,6 +13,7 @@ import { ProblemModel } from "../../models/Problem.model.js";
 import { UserModel } from "../../models/User.model.js";
 import { AppError } from "../../utils/errors.js";
 import { toSearchRegex } from "../../utils/search.js";
+import { notificationService } from "../notification/notification.service.js";
 
 const NOT_FOUND_MESSAGE = "This submission isn't available in the community.";
 
@@ -174,11 +175,24 @@ export const addComment = async (submissionId: string, userId: string, content: 
   if (!trimmed) throw new AppError("Comment cannot be empty.", 400);
 
   // Reuse the same "exists and is visible" guard as the detail page.
-  await getAcceptedSubmissionOrThrow(submissionId);
+  const submission = await getAcceptedSubmissionOrThrow(submissionId);
 
   const review = await ReviewModel.create({ submissionId, userId, content: trimmed });
   const populated = await review.populate("userId", "name profilePicUrl");
-  return toCommentDto(populated);
+  const comment = toCommentDto(populated);
+
+  // Tell the solution's author, unless they are the one commenting.
+  const author = toAuthor(submission.userId as PopulatedAuthor);
+  if (author && author.id !== String(userId)) {
+    const problem = toProblem(submission.problemId as PopulatedProblem);
+    await notificationService.notifyUser(author.id, {
+      type: "comment.new",
+      title: `${comment.author?.name ?? "Someone"} commented on your solution`,
+      body: `${problem ? `${problem.title}: ` : ""}"${trimmed.length > 120 ? `${trimmed.slice(0, 117)}…` : trimmed}"`,
+      href: `/community/${submissionId}`,
+    });
+  }
+  return comment;
 };
 
 export const deleteComment = async (commentId: string, userId: string, isAdmin: boolean) => {

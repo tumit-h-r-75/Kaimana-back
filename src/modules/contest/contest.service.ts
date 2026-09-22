@@ -7,6 +7,7 @@ import { ProblemModel, type Difficulty } from "../../models/Problem.model.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
 import { AppError } from "../../utils/errors.js";
+import { notificationService } from "../notification/notification.service.js";
 
 // mongoose.models.Contest || model<IContest>(...) widens to a loosely-typed
 // Model union, so .findOne().lean() needs an explicit cast — same pattern
@@ -261,7 +262,16 @@ const createContest = async (payload: unknown, manager: ContestManager) => {
   await assertSlugAvailable(slug);
 
   try {
-    return await ContestModel.create({ title, slug, description, startTime, endTime, problems, isPublished, createdBy: manager.userId });
+    const created = await ContestModel.create({ title, slug, description, startTime, endTime, problems, isPublished, createdBy: manager.userId });
+    if (isPublished) {
+      await notificationService.notifyEveryone({
+        type: "contest.published",
+        title: `New contest: ${title}`,
+        body: "Registration is open.",
+        href: `/contest/${slug}`,
+      });
+    }
+    return created;
   } catch (error) {
     return rethrowSlugConflict(error);
   }
@@ -560,6 +570,14 @@ const updateManagedContest = async (id: string, manager: ContestManager, payload
   }
   // Deleted by someone else between the lookup and the update.
   if (!updated) throw new AppError("Contest not found.", 404);
+  if (update.isPublished === true && !contest.isPublished) {
+    await notificationService.notifyEveryone({
+      type: "contest.published",
+      title: `New contest: ${updated.title}`,
+      body: "Registration is open.",
+      href: `/contest/${updated.slug}`,
+    });
+  }
   return buildManagedContestDetail(updated);
 };
 

@@ -6,6 +6,7 @@ import { SubmissionModel } from "../../models/Submission.model.js";
 import { TestCaseModel } from "../../models/TestCase.model.js";
 import { HintUnlockModel } from "../../models/HintUnlock.model.js";
 import { AppError } from "../../utils/errors.js";
+import { notificationService } from "../notification/notification.service.js";
 
 // mongoose.models.Problem || model<IProblem>(...) (see Problem.model.ts) widens
 // to a loosely-typed Model union, which makes .findOne().lean() resolve to an
@@ -167,10 +168,21 @@ interface ICreateProblemInput {
   createdBy?: string;
 }
 
+/** Tells everyone a problem has gone live. */
+const announceProblem = (problem: { title: string; slug: string; difficulty: string }) =>
+  notificationService.notifyEveryone({
+    type: "problem.published",
+    title: `New problem: ${problem.title}`,
+    body: `A new ${String(problem.difficulty).toLowerCase()} problem is in the library.`,
+    href: `/problems/${problem.slug}`,
+  });
+
 const createProblem = async (payload: ICreateProblemInput) => {
   const existing = await ProblemModel.findOne({ slug: payload.slug.toLowerCase() });
   if (existing) throw new AppError("A problem with this slug already exists.", 409);
-  return ProblemModel.create({ ...payload, slug: payload.slug.toLowerCase() });
+  const created = await ProblemModel.create({ ...payload, slug: payload.slug.toLowerCase() });
+  if (created.isPublished) await announceProblem(created);
+  return created;
 };
 
 // `referenceSolution: null` is how the admin edit form asks to clear a saved
@@ -182,8 +194,12 @@ const updateProblem = async (
   if (!Types.ObjectId.isValid(problemId)) throw new AppError("Invalid problem id.", 400);
   const { referenceSolution, ...rest } = payload;
   const update = referenceSolution === null ? { ...rest, $unset: { referenceSolution: 1 } } : payload;
+  // Read before writing, to tell a draft being published from an edit to a
+  // problem that was already live.
+  const before = (await ProblemModel.findById(problemId).select("isPublished").lean()) as unknown as { isPublished?: boolean } | null;
   const problem = await ProblemModel.findByIdAndUpdate(problemId, update, { new: true });
   if (!problem) throw new AppError("Problem not found.", 404);
+  if (problem.isPublished && before && !before.isPublished) await announceProblem(problem);
   return problem;
 };
 

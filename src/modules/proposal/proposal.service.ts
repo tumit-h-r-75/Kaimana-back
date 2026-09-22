@@ -24,6 +24,7 @@ import { TestCaseModel } from "../../models/TestCase.model.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
 import { PROPOSAL_COST_GEMS, PROPOSAL_REJECT_REFUND_GEMS } from "../../utils/gems.js";
 import { AppError } from "../../utils/errors.js";
+import { notificationService } from "../notification/notification.service.js";
 
 // Same loose `mongoose.models.X || model(...)` union as every other model, so
 // .lean() results need an explicit cast (see host.service.ts).
@@ -430,6 +431,12 @@ const createProposal = async (userId: string, payload: unknown) => {
     )) as unknown as { toObject: () => unknown }[];
     return proposal.toObject() as unknown as LeanProposal;
   });
+  await notificationService.notifyAdmins({
+    type: "proposal.submitted",
+    title: "New problem proposal",
+    body: `"${created.title}" is waiting for review.`,
+    href: "/admin/proposals",
+  });
   return toDetailDto(created);
 };
 
@@ -501,6 +508,14 @@ const updateProposal = async (proposalId: string, userId: string, payload: unkno
       })
     : await save();
   if (!updated) throw new AppError(STALE_EDIT_MESSAGE, 409);
+  if (resubmit) {
+    await notificationService.notifyAdmins({
+      type: "proposal.submitted",
+      title: "A proposal is back for review",
+      body: `"${updated.title}" was edited and sent again.`,
+      href: "/admin/proposals",
+    });
+  }
   return toDetailDto(updated);
 };
 
@@ -621,6 +636,12 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
       }
     });
     const rejected = (await ProblemProposalModel.findById(proposal._id).lean()) as unknown as LeanProposal;
+    await notificationService.notifyUser(rejected.userId, {
+      type: "proposal.rejected",
+      title: "Your proposal was not accepted",
+      body: `"${rejected.title}"${rejected.gemsRefunded ? ` — ${rejected.gemsRefunded} gems came back to you` : ""}.${note ? ` ${note}` : ""}`,
+      href: `/profile/proposals/${String(rejected._id)}`,
+    });
     return toDetailDto(rejected, null, await loadProposer(rejected.userId));
   }
 
@@ -712,6 +733,22 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
   }
 
   const accepted = (await ProblemProposalModel.findById(proposal._id).lean()) as unknown as LeanProposal;
+  await notificationService.notifyUser(accepted.userId, {
+    type: "proposal.accepted",
+    title: "Your proposal was accepted",
+    body: publish
+      ? `"${accepted.title}" is live in the problem library.`
+      : `"${accepted.title}" joins the problem library once an admin publishes it.`,
+    href: publish ? `/problems/${slug}` : `/profile/proposals/${String(accepted._id)}`,
+  });
+  if (publish) {
+    await notificationService.notifyEveryone({
+      type: "problem.published",
+      title: `New problem: ${accepted.title}`,
+      body: `A ${String(accepted.difficulty).toLowerCase()} problem, proposed by a learner.`,
+      href: `/problems/${slug}`,
+    });
+  }
   const [problems, user] = await Promise.all([loadLinkedProblems([accepted]), loadProposer(accepted.userId)]);
   return toDetailDto(accepted, problems.get(String(accepted.problemId)), user);
 };
