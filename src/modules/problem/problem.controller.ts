@@ -25,6 +25,12 @@ const getBySlug = catchAsync(async (req: AuthenticatedRequest, res) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problem loaded", data: problem });
 });
 
+// GET /api/problems/topics — the library's topics and difficulties, counted.
+const topics = catchAsync(async (_req, res) => {
+  const result = await problemService.getTopics();
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Topics loaded", data: result });
+});
+
 // GET /api/problems/recommended — what this learner should open next.
 // requireAuth rather than optionalAuth: every part of the answer is derived
 // from their own history, so there is nothing to say to an anonymous caller.
@@ -84,7 +90,7 @@ const deleteProblem = catchAsync(async (req, res) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problem deleted", data: null });
 });
 
-export const problemController = {
+export const problemController = { topics,
   list,
   getBySlug,
   recommended,

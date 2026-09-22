@@ -21,6 +21,8 @@ router.get("/", optionalAuth, problemController.list);
 // Before "/:slug" for the same reason "/admin/*" is: otherwise Express
 // matches "recommended" as a problem slug and returns a 404 for it.
 router.get("/recommended", requireAuth, problemController.recommended);
+// Before /:slug, or "topics" would be read as a problem slug.
+router.get("/topics", problemController.topics);
 router.get("/:slug", optionalAuth, problemController.getBySlug);
 
 // Admin-only authoring.

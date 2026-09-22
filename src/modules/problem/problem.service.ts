@@ -29,6 +29,43 @@ interface IListProblemsQuery {
   userId?: string;
 }
 
+type SubmissionTally = { submissions: number; accepted: number };
+
+// How often each problem is attempted and how often an attempt passes, in
+// one aggregate for the whole set rather than a count per problem.
+const submissionStats = async (problemIds: Types.ObjectId[]) => {
+  if (!problemIds.length) return new Map<string, SubmissionTally>();
+  const rows = await SubmissionModel.aggregate<{ _id: Types.ObjectId } & SubmissionTally>([
+    { $match: { problemId: { $in: problemIds } } },
+    {
+      $group: {
+        _id: "$problemId",
+        submissions: { $sum: 1 },
+        accepted: { $sum: { $cond: [{ $eq: ["$verdict", "ACCEPTED"] }, 1, 0] } },
+      },
+    },
+  ]);
+  return new Map(rows.map((row) => [String(row._id), { submissions: row.submissions, accepted: row.accepted }]));
+};
+
+/** Percentage of submissions accepted, or null before anyone has tried. */
+const acceptanceOf = (tally?: SubmissionTally) =>
+  tally && tally.submissions > 0 ? Math.round((tally.accepted / tally.submissions) * 100) : null;
+
+// A card's one-line summary of the statement: markdown, code blocks and
+// LaTeX markers stripped, whitespace collapsed, cut at a word.
+const EXCERPT_LENGTH = 160;
+const toExcerpt = (statement = "") => {
+  const plain = statement
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[`*#>|$]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= EXCERPT_LENGTH) return plain;
+  const cut = plain.slice(0, EXCERPT_LENGTH);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 100 ? cut.lastIndexOf(" ") : EXCERPT_LENGTH).trimEnd()}…`;
+};
+
 const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, userId }: IListProblemsQuery) => {
   const filter: FilterQuery<IProblem> = { isPublished: true };
   if (difficulty) filter.difficulty = difficulty.toUpperCase();
@@ -40,7 +77,7 @@ const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, us
 
   const [items, total] = await Promise.all([
     ProblemModel.find(filter)
-      .select("slug title difficulty tags basePoints")
+      .select("slug title difficulty tags basePoints statement")
       .sort({ createdAt: -1 })
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)
@@ -60,19 +97,50 @@ const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, us
     solvedProblemIds = new Set(solved.map(String));
   }
 
+  const stats = await submissionStats(items.map((item) => item._id as Types.ObjectId));
+
   return {
-    items: items.map((item) => ({
-      id: String(item._id),
-      slug: item.slug,
-      title: item.title,
-      difficulty: item.difficulty,
-      tags: item.tags,
-      basePoints: item.basePoints,
-      solvedByMe: solvedProblemIds.has(String(item._id)),
-    })),
+    items: items.map((item) => {
+      const tally = stats.get(String(item._id));
+      return {
+        id: String(item._id),
+        slug: item.slug,
+        title: item.title,
+        difficulty: item.difficulty,
+        tags: item.tags,
+        basePoints: item.basePoints,
+        solvedByMe: solvedProblemIds.has(String(item._id)),
+        excerpt: toExcerpt(item.statement),
+        submissionCount: tally?.submissions ?? 0,
+        acceptanceRate: acceptanceOf(tally),
+      };
+    }),
     total,
     page: safePage,
     limit: safeLimit,
+  };
+};
+
+/** Published problems counted by topic and by difficulty, for the library's filters. */
+const getTopics = async () => {
+  const [byTag, byDifficulty, total] = await Promise.all([
+    ProblemModel.aggregate<{ _id: string; count: number }>([
+      { $match: { isPublished: true } },
+      { $unwind: "$tags" },
+      { $group: { _id: "$tags", count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+    ]),
+    ProblemModel.aggregate<{ _id: string; count: number }>([
+      { $match: { isPublished: true } },
+      { $group: { _id: "$difficulty", count: { $sum: 1 } } },
+    ]),
+    ProblemModel.countDocuments({ isPublished: true }),
+  ]);
+  const difficultyCount = Object.fromEntries(byDifficulty.map((row) => [row._id, row.count]));
+  return {
+    total,
+    byDifficulty: { EASY: difficultyCount.EASY ?? 0, MEDIUM: difficultyCount.MEDIUM ?? 0, HARD: difficultyCount.HARD ?? 0 },
+    topics: byTag.map((row) => ({ tag: row._id, count: row.count })),
   };
 };
 
@@ -118,6 +186,29 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
     sampleTests = sampleCases.map(({ input, expectedOutput }) => ({ input, expectedOutput }));
   }
 
+  // Up to four others on the same topics — the natural next thing to try —
+  // topped up with the same difficulty when the topics run short.
+  const relatedByTag = (await ProblemModel.find({ isPublished: true, _id: { $ne: problem._id }, tags: { $in: problem.tags ?? [] } })
+    .select("slug title difficulty tags")
+    .sort({ createdAt: -1 })
+    .limit(4)
+    .lean()) as unknown as { _id: Types.ObjectId; slug: string; title: string; difficulty: string; tags: string[] }[];
+  const relatedFill =
+    relatedByTag.length < 4
+      ? ((await ProblemModel.find({
+          isPublished: true,
+          difficulty: problem.difficulty,
+          _id: { $nin: [problem._id, ...relatedByTag.map((p) => p._id)] },
+        })
+          .select("slug title difficulty tags")
+          .sort({ createdAt: -1 })
+          .limit(4 - relatedByTag.length)
+          .lean()) as unknown as typeof relatedByTag)
+      : [];
+  const related = [...relatedByTag, ...relatedFill];
+  const tallies = await submissionStats([problem._id, ...related.map((p) => p._id)]);
+  const ownTally = tallies.get(String(problem._id));
+
   return {
     id: String(problem._id),
     slug: problem.slug,
@@ -137,6 +228,19 @@ const getProblemBySlug = async (slug: string, userId?: string) => {
     myBestVerdict,
     myHintTier,
     myHintPenaltyPercent,
+    stats: {
+      submissions: ownTally?.submissions ?? 0,
+      accepted: ownTally?.accepted ?? 0,
+      acceptanceRate: acceptanceOf(ownTally),
+    },
+    related: related.map((p) => ({
+      slug: p.slug,
+      title: p.title,
+      difficulty: p.difficulty,
+      tags: p.tags ?? [],
+      acceptanceRate: acceptanceOf(tallies.get(String(p._id))),
+      submissionCount: tallies.get(String(p._id))?.submissions ?? 0,
+    })),
     // Withheld until the learner has solved it themselves — before that it
     // is the answer key. Afterwards it is the thing they actually came for:
     // something to compare their own approach against, which the hints
@@ -452,6 +556,7 @@ const getRecommendations = async (userId: string) => {
 };
 
 export const problemService = {
+  getTopics,
   listProblems,
   getProblemBySlug,
   getRecommendations,
