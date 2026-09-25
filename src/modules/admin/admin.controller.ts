@@ -5,6 +5,7 @@ import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
 import { AppError } from "../../utils/errors.js";
 import { adminService, USER_ROLES, USER_STATUSES } from "./admin.service.js";
+import { pulseService } from "./pulse.service.js";
 import type { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
 
 // Validates an optional enum field from the query string or JSON body: absent
@@ -19,6 +20,14 @@ const optionalOneOf = <T extends string>(value: unknown, options: readonly T[], 
 const stats = catchAsync(async (_req, res) => {
   const result = await adminService.getStats();
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Stats loaded", data: result });
+});
+
+// GET /api/admin/stats/pulse
+// The same platform, over time: a day-by-day series, what verdicts the judge
+// is handing out, the shape of the library and the problems nobody solves.
+const pulse = catchAsync(async (_req, res) => {
+  const result = await pulseService.getPulse();
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Pulse loaded", data: result });
 });
 
 // GET /api/admin/users?page=&limit=&search=&role=
@@ -45,4 +54,4 @@ const updateUser = catchAsync(async (req: AuthenticatedRequest, res) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "User updated", data: user });
 });
 
-export const adminController = { stats, listUsers, updateUser };
+export const adminController = { stats, pulse, listUsers, updateUser };

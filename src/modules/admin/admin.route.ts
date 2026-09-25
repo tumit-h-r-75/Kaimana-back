@@ -12,6 +12,7 @@ const router = express.Router();
 router.use(requireAuth, requireAdmin);
 
 router.get("/stats", adminController.stats);
+router.get("/stats/pulse", adminController.pulse);
 router.get("/users", adminController.listUsers);
 router.patch("/users/:id", adminController.updateUser);
 
