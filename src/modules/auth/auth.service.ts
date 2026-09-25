@@ -399,10 +399,10 @@ const MAX_VERIFY_SENDS_PER_HOUR = 3;
  */
 const sendEmailVerification = async (userId: unknown) => {
     const user = await UserModel.findById(String(userId ?? ""));
-    if (!user?.email || user.emailVerifiedAt) return;
+    if (!user?.email || user.emailVerifiedAt) return false;
 
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    if ((await EmailVerificationModel.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } })) >= MAX_VERIFY_SENDS_PER_HOUR) return;
+    if ((await EmailVerificationModel.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } })) >= MAX_VERIFY_SENDS_PER_HOUR) return false;
 
     const token = randomBytes(32).toString("base64url");
     await EmailVerificationModel.create({
@@ -412,7 +412,7 @@ const sendEmailVerification = async (userId: unknown) => {
         expiresAt: new Date(Date.now() + EMAIL_VERIFY_MINUTES * 60 * 1000),
     });
     const url = `${config.frontendUrls[0] ?? ""}/verify-email?token=${token}`;
-    await mailService.deliver(user.email, mailTemplates.verifyEmail({ name: user.name, url, minutes: EMAIL_VERIFY_MINUTES }), { urgent: true });
+    return mailService.deliver(user.email, mailTemplates.verifyEmail({ name: user.name, url, minutes: EMAIL_VERIFY_MINUTES }), { urgent: true });
 };
 
 /** Spends a confirmation link. */

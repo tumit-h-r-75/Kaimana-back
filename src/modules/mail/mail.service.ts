@@ -12,7 +12,7 @@
 // the outbox row instead.
 
 import { EmailOutboxModel } from "../../models/EmailOutbox.model.js";
-import { mailIsConfigured, sendThroughResend, type OutgoingMail } from "../../integrations/resend/resend.service.js";
+import { mailIsConfigured, sendThroughResend, PermanentMailError, type OutgoingMail } from "../../integrations/resend/resend.service.js";
 import type { BuiltMail } from "./mail.templates.js";
 
 const MAX_ATTEMPTS = 5;
@@ -27,6 +27,8 @@ const BACKOFF_MINUTES = [1, 5, 15, 60, 240];
 const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000);
 
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 500);
+
+const isPermanent = (error: unknown) => error instanceof PermanentMailError;
 
 const toOutgoing = (to: string, mail: BuiltMail): OutgoingMail => ({
   to: to.toLowerCase().trim(),
@@ -58,12 +60,13 @@ const sendNow = async (to: string, mail: BuiltMail) => {
     return true;
   } catch (error) {
     console.error(`Sending "${mail.subject}" to ${outgoing.to} failed:`, reason(error));
+    const permanent = isPermanent(error);
     await EmailOutboxModel.create({
       ...outgoing,
-      status: "queued",
+      status: permanent ? "failed" : "queued",
       attempts: 1,
       lastError: reason(error),
-      sendAfter: minutesFromNow(BACKOFF_MINUTES[0]),
+      ...(permanent ? {} : { sendAfter: minutesFromNow(BACKOFF_MINUTES[0]) }),
     }).catch(() => undefined);
     return false;
   }
@@ -107,7 +110,7 @@ const flush = async (limit = 10) => {
       result.sent += 1;
     } catch (error) {
       const attempts = claimed.attempts;
-      const exhausted = attempts >= MAX_ATTEMPTS;
+      const exhausted = attempts >= MAX_ATTEMPTS || isPermanent(error);
       await EmailOutboxModel.updateOne(
         { _id: claimed._id },
         {

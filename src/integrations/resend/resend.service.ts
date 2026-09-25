@@ -23,6 +23,11 @@ export interface OutgoingMail {
 
 export const mailIsConfigured = () => Boolean(config.resendApiKey);
 
+/** A failure the provider will repeat however many times we ask. */
+export class PermanentMailError extends Error {
+  readonly permanent = true;
+}
+
 /** Resolves with the provider's message id, or throws with its reason. */
 export const sendThroughResend = async (mail: OutgoingMail): Promise<string> => {
   if (!config.resendApiKey) {
@@ -58,7 +63,12 @@ export const sendThroughResend = async (mail: OutgoingMail): Promise<string> => 
     parsed = {};
   }
   if (!response.ok) {
-    throw new Error(parsed.message ?? `Resend responded ${response.status} ${raw.slice(0, 200)}`);
+    const reason = parsed.message ?? `Resend responded ${response.status} ${raw.slice(0, 200)}`;
+    // 4xx is the provider saying no — a bad key, an unverified sender, a
+    // recipient the account is not allowed to write to. 408 and 429 are the
+    // exceptions: those mean "not now", not "never".
+    const permanent = response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429;
+    throw permanent ? new PermanentMailError(reason) : new Error(reason);
   }
   return parsed.id ?? "sent";
 };

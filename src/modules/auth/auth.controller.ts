@@ -182,10 +182,16 @@ const verifyEmail = catchAsync(async (req, res) => {
 });
 
 const resendVerification = catchAsync(async (req, res) => {
-    await authService.sendEmailVerification((req as AuthenticatedRequest).user?._id);
-    // Always the same answer: whether a link went out depends on state the
-    // caller does not need reported back to them.
-    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "If that account still needs confirming, a link is on its way.", data: null });
+    // This is mail about the caller's own account, so whether it actually
+    // left the building is theirs to know — a page that says "check your
+    // inbox" when nothing was sent is worse than one that admits it.
+    const sent = await authService.sendEmailVerification((req as AuthenticatedRequest).user?._id);
+    sendResponse(res, {
+        success: true,
+        statusCode: httpStatus.OK,
+        message: sent ? "Confirmation link sent." : "Could not send the link just now.",
+        data: { sent: Boolean(sent) },
+    });
 });
 
 export const authController = {
