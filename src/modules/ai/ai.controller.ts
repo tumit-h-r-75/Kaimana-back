@@ -9,6 +9,7 @@ import { hintService } from "./hint.service.js";
 import { auditService } from "./audit.service.js";
 import { refactorService } from "./refactor.service.js";
 import { testgenService } from "./testgen.service.js";
+import { explainService } from "./explain.service.js";
 import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
@@ -56,6 +57,28 @@ const getHint = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   // hints on unpublished drafts, everyone else gets a 404 for them.
   const result = await hintService.getHint({ userId, problemId, level: level ?? 1, code, role: req.user?.role, language: resolveAiLanguage(language) });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Hint generated", data: result });
+});
+
+// Reading an explanation of your own failure is cheap for us and the most
+// common thing anyone will do after a red verdict, so the limit is the
+// hint limiter's, not the audit one's.
+const recentExplainRequests = new Map<string, number[]>();
+const EXPLAIN_LIMIT_PER_MINUTE = 10;
+
+const explainFailure = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  const now = Date.now();
+  const requests = (recentExplainRequests.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (requests.length >= EXPLAIN_LIMIT_PER_MINUTE) {
+    throw new AppError("Too many requests. Try again in a minute.", 429);
+  }
+  recentExplainRequests.set(userId, [...requests, now]);
+
+  const { submissionId, language } = req.body as { submissionId?: string; language?: string };
+  if (!submissionId) throw new AppError("submissionId is required.", 400);
+
+  const result = await explainService.explainFailure({ userId, submissionId, language: resolveAiLanguage(language) });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Failure explained", data: result });
 });
 
 const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
@@ -123,4 +146,4 @@ const generateTests = catchAsync(async (req: AuthenticatedRequest, res: Response
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Test cases generated", data: result });
 });
 
-export const aiController = { getHint, runAudit, runRefactor, verifyRefactor, generateTests };
+export const aiController = { getHint, explainFailure, runAudit, runRefactor, verifyRefactor, generateTests };

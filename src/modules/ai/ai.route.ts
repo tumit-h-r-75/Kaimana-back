@@ -6,6 +6,7 @@ import { aiController } from "./ai.controller.js";
 
 const router = express.Router();
 router.post("/hint", requireAuth, aiController.getHint);
+router.post("/explain-failure", requireAuth, aiController.explainFailure);
 router.post("/audit", requireAuth, aiController.runAudit);
 router.post("/refactor", requireAuth, aiController.runRefactor);
 router.post("/refactor/verify", requireAuth, aiController.verifyRefactor);
