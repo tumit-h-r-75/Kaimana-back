@@ -53,6 +53,18 @@ export interface IRefactorSuggestion {
   isVerified: boolean;
 }
 
+export interface ICodeQualityScore {
+  total: number;
+  naming: number;
+  structure: number;
+  clarity: number;
+  robustness: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  scoredAt: Date;
+}
+
 export interface ISubmission {
   userId: Types.ObjectId;
   problemId: Types.ObjectId;
@@ -68,6 +80,8 @@ export interface ISubmission {
   errorMessage?: string;
   failedTest?: IFailedTest;
   complexityReport?: IComplexityReport;
+  /** How the code reads, scored once — the code cannot change afterwards. */
+  qualityScore?: ICodeQualityScore;
   refactorSuggestions?: IRefactorSuggestion[];
   submittedAt: Date;
   createdAt: Date;
@@ -90,6 +104,21 @@ const scalingDataPointSchema = new Schema<IScalingDataPoint>(
     size: { type: Number, required: true },
     runtimeMs: { type: Number, required: true },
     memoryKb: { type: Number, required: true },
+  },
+  { _id: false },
+);
+
+const codeQualityScoreSchema = new Schema<ICodeQualityScore>(
+  {
+    total: { type: Number, required: true },
+    naming: { type: Number, required: true },
+    structure: { type: Number, required: true },
+    clarity: { type: Number, required: true },
+    robustness: { type: Number, required: true },
+    summary: { type: String, default: "" },
+    strengths: { type: [String], default: [] },
+    improvements: { type: [String], default: [] },
+    scoredAt: { type: Date, default: Date.now },
   },
   { _id: false },
 );
@@ -146,6 +175,7 @@ const submissionSchema = new Schema<ISubmission>(
     errorMessage: { type: String },
     failedTest: { type: failedTestSchema },
     complexityReport: { type: complexityReportSchema },
+    qualityScore: { type: codeQualityScoreSchema },
     refactorSuggestions: { type: [refactorSuggestionSchema], default: [] },
     submittedAt: { type: Date, default: Date.now },
   },
