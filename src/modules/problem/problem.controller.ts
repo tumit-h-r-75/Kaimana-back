@@ -31,6 +31,12 @@ const topics = catchAsync(async (_req, res) => {
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Topics loaded", data: result });
 });
 
+// GET /api/problems/daily — the same problem for everybody, until midnight.
+const daily = catchAsync(async (req: AuthenticatedRequest, res) => {
+  const result = await problemService.getDailyProblem(req.user?._id ? String(req.user._id) : undefined);
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Problem of the day.", data: result });
+});
+
 // GET /api/problems/recommended — what this learner should open next.
 // requireAuth rather than optionalAuth: every part of the answer is derived
 // from their own history, so there is nothing to say to an anonymous caller.
@@ -93,6 +99,7 @@ const deleteProblem = catchAsync(async (req, res) => {
 export const problemController = { topics,
   list,
   getBySlug,
+  daily,
   recommended,
   create,
   update,

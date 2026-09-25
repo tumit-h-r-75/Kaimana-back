@@ -555,9 +555,85 @@ const getRecommendations = async (userId: string) => {
   };
 };
 
+/* ------------------------------------------------------------------ daily */
+
+/**
+ * One problem for everybody, changing at midnight UTC.
+ *
+ * The pick is the date itself, taken modulo the number of published
+ * problems, against a stable ordering — so it needs no stored schedule, two
+ * people opening the site an hour apart see the same problem, and it is the
+ * same one tomorrow only if the library has exactly one problem in it.
+ */
+const getDailyProblem = async (userId?: string) => {
+  const total = await ProblemModel.countDocuments({ isPublished: true });
+  if (!total) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const seed = Number(today.replace(/-/g, ""));
+  const problem = await ProblemModel.findOne({ isPublished: true })
+    .sort({ _id: 1 })
+    .skip(seed % total)
+    .select("slug title difficulty tags basePoints statement")
+    .lean<{ _id: Types.ObjectId; slug: string; title: string; difficulty: string; tags: string[]; basePoints: number; statement: string } | null>();
+  if (!problem) return null;
+
+  const stats = await submissionStats([problem._id as Types.ObjectId]);
+  const tally = stats.get(String(problem._id));
+
+  // What the signed-in reader still needs to know: have they done it, and is
+  // today already counted towards their streak.
+  let solved = false;
+  let solvedToday = false;
+  let streakDays = 0;
+  if (userId) {
+    const startOfDay = new Date(`${today}T00:00:00.000Z`);
+    const [accepted, acceptedToday, days] = await Promise.all([
+      SubmissionModel.exists({ userId, problemId: problem._id, verdict: "ACCEPTED" }),
+      SubmissionModel.exists({ userId, verdict: "ACCEPTED", createdAt: { $gte: startOfDay } }),
+      SubmissionModel.aggregate<{ _id: string }>([
+        { $match: { userId: new Types.ObjectId(userId), verdict: "ACCEPTED", createdAt: { $gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } } } },
+      ]),
+    ]);
+    solved = Boolean(accepted);
+    solvedToday = Boolean(acceptedToday);
+
+    // Days in a row, counting back from today. Yesterday still counts: a
+    // streak should not break because it is early in the morning.
+    const seen = new Set(days.map((day) => day._id));
+    const key = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    if (seen.has(key(0)) || seen.has(key(1))) {
+      for (let offset = 0; offset < 90; offset += 1) {
+        if (seen.has(key(offset))) streakDays += 1;
+        else if (offset > 0) break;
+      }
+    }
+  }
+
+  return {
+    date: today,
+    problem: {
+      id: String(problem._id),
+      slug: problem.slug,
+      title: problem.title,
+      difficulty: problem.difficulty,
+      tags: problem.tags,
+      basePoints: problem.basePoints,
+      excerpt: toExcerpt(problem.statement),
+      submissionCount: tally?.submissions ?? 0,
+      acceptanceRate: acceptanceOf(tally),
+    },
+    solved,
+    solvedToday,
+    streakDays,
+  };
+};
+
 export const problemService = {
   getTopics,
   listProblems,
+  getDailyProblem,
   getProblemBySlug,
   getRecommendations,
   createProblem,

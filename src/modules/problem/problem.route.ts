@@ -20,6 +20,8 @@ router.delete("/admin/:id", requireAuth, requireAdmin, problemController.deleteP
 router.get("/", optionalAuth, problemController.list);
 // Before "/:slug" for the same reason "/admin/*" is: otherwise Express
 // matches "recommended" as a problem slug and returns a 404 for it.
+// Before the ":slug" route, which would otherwise match "daily" as a slug.
+router.get("/daily", optionalAuth, problemController.daily);
 router.get("/recommended", requireAuth, problemController.recommended);
 // Before /:slug, or "topics" would be read as a problem slug.
 router.get("/topics", problemController.topics);
