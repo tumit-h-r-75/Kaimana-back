@@ -20,6 +20,7 @@ import { SubmissionModel, type IRefactorSuggestion } from "../../models/Submissi
 import { judgeSubmission } from "../submission/judge.service.js";
 import { AppError } from "../../utils/errors.js";
 import { askAi, isAiConfigured } from "./ai.service.js";
+import type { AiLanguageCode } from "./aiLanguage.js";
 import type { JudgeLanguage } from "../../integrations/judge0/judge0.service.js";
 
 const MAX_SUGGESTIONS = 3;
@@ -60,7 +61,15 @@ const parseSuggestions = (raw: string): ParsedSuggestion[] | null => {
   }
 };
 
-export const generateRefactorSuggestions = async ({ userId, submissionId }: { userId: string; submissionId: string }) => {
+export const generateRefactorSuggestions = async ({
+  userId,
+  submissionId,
+  language,
+}: {
+  userId: string;
+  submissionId: string;
+  language?: AiLanguageCode;
+}) => {
   if (!Types.ObjectId.isValid(submissionId)) throw new AppError("Submission not found.", 404);
   const submission = await SubmissionModel.findById(submissionId);
   if (!submission) throw new AppError("Submission not found.", 404);
@@ -83,7 +92,7 @@ export const generateRefactorSuggestions = async ({ userId, submissionId }: { us
 
   let parsed: ParsedSuggestion[] | null = null;
   for (let attempt = 0; attempt < 2 && !parsed; attempt += 1) {
-    const raw = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 1800 });
+    const raw = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 1800, language });
     if (raw) parsed = parseSuggestions(raw);
   }
 

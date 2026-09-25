@@ -70,7 +70,7 @@ const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => 
   const { submissionId } = req.body as { submissionId?: string };
   if (!submissionId) throw new AppError("submissionId is required.", 400);
 
-  const result = await auditService.runComplexityAudit({ userId, submissionId });
+  const result = await auditService.runComplexityAudit({ userId, submissionId, language: resolveAiLanguage((req.body as { language?: string }).language) });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Complexity audit complete", data: result });
 });
 
@@ -86,7 +86,7 @@ const runRefactor = catchAsync(async (req: AuthenticatedRequest, res: Response) 
   const { submissionId } = req.body as { submissionId?: string };
   if (!submissionId) throw new AppError("submissionId is required.", 400);
 
-  const result = await refactorService.generateRefactorSuggestions({ userId, submissionId });
+  const result = await refactorService.generateRefactorSuggestions({ userId, submissionId, language: resolveAiLanguage((req.body as { language?: string }).language) });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Refactor suggestions generated", data: result });
 });
 

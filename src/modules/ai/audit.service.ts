@@ -27,6 +27,7 @@ import { analyzeStructure } from "../../utils/complexity/structuralAnalysis.js";
 import { estimateComplexityClass, complexityClassForLoopDepth, type CurveFitResult } from "../../utils/complexity/curveFit.js";
 import { AppError } from "../../utils/errors.js";
 import { askAi } from "./ai.service.js";
+import type { AiLanguageCode } from "./aiLanguage.js";
 
 const MAX_SAMPLED_TEST_CASES = 6;
 
@@ -81,7 +82,15 @@ const buildFallbackExplanation = (
   return parts.join(" ");
 };
 
-export const runComplexityAudit = async ({ userId, submissionId }: { userId: string; submissionId: string }): Promise<IComplexityReport> => {
+export const runComplexityAudit = async ({
+  userId,
+  submissionId,
+  language,
+}: {
+  userId: string;
+  submissionId: string;
+  language?: AiLanguageCode;
+}): Promise<IComplexityReport> => {
   if (!Types.ObjectId.isValid(submissionId)) throw new AppError("Submission not found.", 404);
   const submission = await SubmissionModel.findById(submissionId);
   if (!submission) throw new AppError("Submission not found.", 404);
@@ -128,7 +137,7 @@ Empirical space fit: ${spaceFit ? `slope ${spaceFit.slope}, R² ${spaceFit.rSqua
 
 Explain this result to the learner.`;
 
-  const aiExplanation = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 700 });
+  const aiExplanation = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 700, language });
   const explanation = aiExplanation ?? buildFallbackExplanation(timeFit, spaceFit, structural, timeComplexity, spaceComplexity, confidence);
 
   const report: IComplexityReport = {
