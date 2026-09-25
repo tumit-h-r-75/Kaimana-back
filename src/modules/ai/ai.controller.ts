@@ -11,6 +11,7 @@ import { refactorService } from "./refactor.service.js";
 import { testgenService } from "./testgen.service.js";
 import { explainService } from "./explain.service.js";
 import { followUpService } from "./followUp.service.js";
+import { explainSolutionService } from "./explainSolution.service.js";
 import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
@@ -117,6 +118,22 @@ const markFollowUp = catchAsync(async (req: AuthenticatedRequest, res: Response)
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Answer marked", data: result });
 });
 
+const explainSolution = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  const now = Date.now();
+  const requests = (recentExplainRequests.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (requests.length >= EXPLAIN_LIMIT_PER_MINUTE) {
+    throw new AppError("Too many requests. Try again in a minute.", 429);
+  }
+  recentExplainRequests.set(userId, [...requests, now]);
+
+  const { submissionId, language } = req.body as { submissionId?: string; language?: string };
+  if (!submissionId) throw new AppError("submissionId is required.", 400);
+
+  const result = await explainSolutionService.explainSolution({ userId, submissionId, language: resolveAiLanguage(language) });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Solution explained", data: result });
+});
+
 const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
   const now = Date.now();
@@ -182,4 +199,14 @@ const generateTests = catchAsync(async (req: AuthenticatedRequest, res: Response
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Test cases generated", data: result });
 });
 
-export const aiController = { getHint, explainFailure, askFollowUps, markFollowUp, runAudit, runRefactor, verifyRefactor, generateTests };
+export const aiController = {
+  getHint,
+  explainFailure,
+  explainSolution,
+  askFollowUps,
+  markFollowUp,
+  runAudit,
+  runRefactor,
+  verifyRefactor,
+  generateTests,
+};
