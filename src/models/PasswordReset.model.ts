@@ -6,7 +6,7 @@
 // (Mongo's TTL monitor), and is marked used the moment it is spent, so a
 // link that reaches someone else's inbox cannot be replayed.
 
-import { Schema, model, models, type Model, type Types } from "mongoose";
+import mongoose, { Schema, model, type Model, type Types } from "mongoose";
 
 export interface IPasswordReset {
   userId: Types.ObjectId;
@@ -33,4 +33,4 @@ const passwordResetSchema = new Schema<IPasswordReset>(
 passwordResetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const PasswordResetModel: Model<IPasswordReset> =
-  (models.PasswordReset as Model<IPasswordReset>) ?? model<IPasswordReset>("PasswordReset", passwordResetSchema);
+  (mongoose.models.PasswordReset as Model<IPasswordReset>) ?? model<IPasswordReset>("PasswordReset", passwordResetSchema);

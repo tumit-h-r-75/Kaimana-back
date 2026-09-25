@@ -5,7 +5,7 @@
 // here first; the sender marks it sent, or records why it did not go and
 // when to try again. mail.service.ts is the only thing that touches it.
 
-import { Schema, model, models, type Model } from "mongoose";
+import mongoose, { Schema, model, type Model } from "mongoose";
 
 export type EmailStatus = "queued" | "sending" | "sent" | "failed";
 
@@ -48,4 +48,4 @@ emailOutboxSchema.index({ status: 1, sendAfter: 1 });
 emailOutboxSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
 
 export const EmailOutboxModel: Model<IEmailOutbox> =
-  (models.EmailOutbox as Model<IEmailOutbox>) ?? model<IEmailOutbox>("EmailOutbox", emailOutboxSchema);
+  (mongoose.models.EmailOutbox as Model<IEmailOutbox>) ?? model<IEmailOutbox>("EmailOutbox", emailOutboxSchema);
