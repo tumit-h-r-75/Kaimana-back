@@ -14,6 +14,7 @@ import { followUpService } from "./followUp.service.js";
 import { explainSolutionService } from "./explainSolution.service.js";
 import { proposalReviewService } from "./proposalReview.service.js";
 import { codeQualityService } from "./codeQuality.service.js";
+import { kidsExplainService } from "./kidsExplain.service.js";
 import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
@@ -180,6 +181,34 @@ const codeQualityHistory = catchAsync(async (req: AuthenticatedRequest, res: Res
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Code quality over time", data: result });
 });
 
+// A child stuck on a level will ask more than once, and the answer is
+// short, so this is the loosest limit here.
+const recentKidsExplains = new Map<string, number[]>();
+const KIDS_EXPLAIN_LIMIT_PER_MINUTE = 12;
+
+const explainForKid = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  const now = Date.now();
+  const requests = (recentKidsExplains.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (requests.length >= KIDS_EXPLAIN_LIMIT_PER_MINUTE) {
+    throw new AppError("Bolt needs a moment. Try again shortly.", 429);
+  }
+  recentKidsExplains.set(userId, [...requests, now]);
+
+  const { levelTitle, goal, kind, program, expected, actual, error, language } = req.body as Record<string, unknown>;
+  const result = await kidsExplainService.explainForKid({
+    levelTitle,
+    goal,
+    kind,
+    program,
+    expected,
+    actual,
+    error,
+    language: resolveAiLanguage(language),
+  });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Bolt explained", data: result });
+});
+
 const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
   const now = Date.now();
@@ -252,6 +281,7 @@ export const aiController = {
   reviewProposalDraft,
   scoreCodeQuality,
   codeQualityHistory,
+  explainForKid,
   askFollowUps,
   markFollowUp,
   runAudit,

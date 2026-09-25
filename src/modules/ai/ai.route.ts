@@ -10,6 +10,7 @@ router.post("/explain-failure", requireAuth, aiController.explainFailure);
 router.post("/explain-solution", requireAuth, aiController.explainSolution);
 router.post("/review-draft", requireAuth, aiController.reviewProposalDraft);
 router.post("/code-quality", requireAuth, aiController.scoreCodeQuality);
+router.post("/kids-explain", requireAuth, aiController.explainForKid);
 router.get("/code-quality/history", requireAuth, aiController.codeQualityHistory);
 router.post("/follow-ups", requireAuth, aiController.askFollowUps);
 router.post("/follow-ups/answer", requireAuth, aiController.markFollowUp);
