@@ -22,6 +22,13 @@ export interface IUser {
   // When the user last opened their notifications; anything newer counts
   // as unread (see models/Notification.model.ts).
   notificationsSeenAt?: Date;
+  // Which of the optional emails this person wants. The ones that answer
+  // something they just did — a reset link, a password change — are not
+  // listed here and always send.
+  emailPrefs?: { contestReminders: boolean; weeklyDigest: boolean };
+  // Lets an unsubscribe link work from an inbox, with no session. Random,
+  // per user, and only ever turns mail off.
+  unsubscribeToken?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,6 +88,13 @@ const userSchema = new Schema<IUser>(
     notificationsSeenAt: {
       type: Date,
     },
+
+    emailPrefs: {
+      contestReminders: { type: Boolean, default: true },
+      weeklyDigest: { type: Boolean, default: true },
+    },
+
+    unsubscribeToken: { type: String, index: true, select: false },
   },
   {
     timestamps: true,

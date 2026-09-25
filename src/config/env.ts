@@ -62,6 +62,8 @@ const envSchema = z.object({
   MAIL_REPLY_TO: optionalString,
   // Shared secret for the scheduled flush of the mail outbox.
   MAIL_CRON_SECRET: optionalString,
+  // This API's own public address, used for one-click unsubscribe links.
+  PUBLIC_API_URL: optionalString,
   JWT_ACCESS_SECRET: z.string().min(1, "JWT_ACCESS_SECRET is required"),
   JWT_REFRESH_SECRET: z.string().min(1, "JWT_REFRESH_SECRET is required"),
   JWT_ACCESS_EXPIRES_IN: z.string().min(1, "JWT_ACCESS_EXPIRES_IN is required"),
@@ -102,6 +104,7 @@ export const config = {
   mailFrom: env.MAIL_FROM ?? "Kaimana <onboarding@resend.dev>",
   mailReplyTo: env.MAIL_REPLY_TO,
   mailCronSecret: env.MAIL_CRON_SECRET,
+  publicApiUrl: env.PUBLIC_API_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined),
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
   jwtRefreshSecret: env.JWT_REFRESH_SECRET,
   jwtAccessExpiresIn: env.JWT_ACCESS_EXPIRES_IN,

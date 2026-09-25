@@ -371,4 +371,15 @@ const resetPassword = async ({ token, newPassword }: { token?: unknown; newPassw
     await mailService.deliver(user.email, mailTemplates.passwordChanged({ name: user.name }));
 };
 
-export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword, requestPasswordReset, resetPassword };
+/** Which optional emails this person wants. Transactional mail ignores it. */
+const updateEmailPreferences = async ({ userId, contestReminders, weeklyDigest }: { userId: string; contestReminders?: unknown; weeklyDigest?: unknown }) => {
+    const update: Record<string, boolean> = {};
+    if (typeof contestReminders === "boolean") update["emailPrefs.contestReminders"] = contestReminders;
+    if (typeof weeklyDigest === "boolean") update["emailPrefs.weeklyDigest"] = weeklyDigest;
+    if (!Object.keys(update).length) throw new AppError("Nothing to change.", 400);
+    const user = await UserModel.findByIdAndUpdate(userId, { $set: update }, { new: true });
+    if (!user) throw new AppError("User not found.", 404);
+    return { emailPrefs: { contestReminders: user.emailPrefs?.contestReminders !== false, weeklyDigest: user.emailPrefs?.weeklyDigest !== false } };
+};
+
+export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword, requestPasswordReset, resetPassword, updateEmailPreferences };

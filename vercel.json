@@ -14,7 +14,7 @@
   ],
   "crons": [
     {
-      "path": "/api/mail/flush",
+      "path": "/api/mail/cron",
       "schedule": "0 3 * * *"
     }
   ]

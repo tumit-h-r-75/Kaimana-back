@@ -16,6 +16,10 @@ export interface IContest {
   endTime: Date;
   problems: IContestProblem[];
   isPublished: boolean;
+  /** When the "starting soon" mail went out, so it goes out once. */
+  remindersSentAt?: Date;
+  /** When the standings mail went out, likewise. */
+  resultsSentAt?: Date;
   createdBy?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +43,8 @@ const contestSchema = new Schema<IContest>(
     endTime: { type: Date, required: true, index: true },
     problems: { type: [contestProblemSchema], default: [] },
     isPublished: { type: Boolean, default: true, index: true },
+    remindersSentAt: { type: Date },
+    resultsSentAt: { type: Date },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

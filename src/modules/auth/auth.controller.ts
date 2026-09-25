@@ -171,6 +171,11 @@ const resetPassword = catchAsync(async (req, res) => {
     sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Your password has been changed. Sign in with it.", data: null });
 });
 
+const updateEmailPreferences = catchAsync(async (req, res) => {
+    const result = await authService.updateEmailPreferences({ userId: String((req as AuthenticatedRequest).user?._id), contestReminders: req.body?.contestReminders, weeklyDigest: req.body?.weeklyDigest });
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Email preferences updated", data: result });
+});
+
 export const authController = {
     googleClientConfig,
     googleAuth,
@@ -183,4 +188,5 @@ export const authController = {
     changePassword,
     forgotPassword,
     resetPassword,
+    updateEmailPreferences,
 };

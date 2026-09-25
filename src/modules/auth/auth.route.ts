@@ -24,5 +24,6 @@ router.post("/change-password", requireAuth, authController.changePassword);
 // account per hour) rather than by a session.
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
+router.patch("/me/email-preferences", requireAuth, authController.updateEmailPreferences);
 
 export const authRouter = router;

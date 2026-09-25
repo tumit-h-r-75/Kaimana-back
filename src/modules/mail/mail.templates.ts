@@ -17,6 +17,14 @@ export interface BuiltMail {
 
 const site = () => config.frontendUrls[0] ?? "https://kaimana.vercel.app";
 
+const api = () => (config.publicApiUrl ?? "").replace(/\/$/, "");
+
+/** The footer every optional email carries. */
+const optOut = (token: string | undefined, kind: "contestReminders" | "weeklyDigest", what: string) =>
+  token && api()
+    ? `You get this because ${what}. <a href="${api()}/api/mail/unsubscribe?token=${encodeURIComponent(token)}&type=${kind}" style="color:${ACCENT};text-decoration:none;">Turn these off</a>, or choose what reaches you in <a href="${site()}/profile" style="color:${ACCENT};text-decoration:none;">your profile</a>.`
+    : `You get this because ${what}. Choose what reaches you in <a href="${site()}/profile" style="color:${ACCENT};text-decoration:none;">your profile</a>.`;
+
 // Names and titles come from user input and land inside markup.
 const escape = (value: unknown) =>
   String(value ?? "")
@@ -173,4 +181,129 @@ const notification = ({ name, title, body, href }: { name: string; title: string
   };
 };
 
-export const mailTemplates = { passwordReset, passwordChanged, passwordResetGoogleAccount, welcome, notification };
+/** A contest someone registered for is about to start. */
+const contestReminder = ({
+  name,
+  contest,
+  startsIn,
+  unsubscribeToken,
+}: {
+  name: string;
+  contest: { title: string; slug: string; startTime: Date };
+  startsIn: string;
+  unsubscribeToken?: string;
+}): BuiltMail => {
+  const url = `${site()}/contests/${contest.slug}`;
+  const when = contest.startTime.toUTCString();
+  return {
+    subject: `${contest.title} starts ${startsIn}`,
+    html: layout({
+      heading: `${escape(contest.title)} starts ${escape(startsIn)}`,
+      lines: [
+        `Hi ${escape(name)}, you are registered for this one.`,
+        `It opens at ${escape(when)} and the clock starts the moment you do.`,
+        "Open the problems a minute early, pick your language, and have the editor ready.",
+      ],
+      button: { label: "Go to the contest", href: url },
+      footnote: optOut(unsubscribeToken, "contestReminders", "you registered for this contest"),
+    }),
+    text: [`Hi ${name},`, "", `${contest.title} starts ${startsIn} (${when}).`, url].join("\n"),
+  };
+};
+
+/** How it went, once the contest is over and the standings are final. */
+const contestResults = ({
+  name,
+  contest,
+  rank,
+  total,
+  score,
+  solved,
+  unsubscribeToken,
+}: {
+  name: string;
+  contest: { title: string; slug: string };
+  rank: number | null;
+  total: number;
+  score: number;
+  solved: number;
+  unsubscribeToken?: string;
+}): BuiltMail => {
+  const url = `${site()}/contests/${contest.slug}`;
+  const placed = rank ? `You finished ${rank} of ${total}` : "You did not submit anything this time";
+  return {
+    subject: `${contest.title}: the final standings`,
+    html: layout({
+      heading: `${escape(contest.title)} is over`,
+      lines: [
+        `Hi ${escape(name)}, the standings are final.`,
+        `${escape(placed)}, with ${score} points from ${solved} ${solved === 1 ? "problem" : "problems"}.`,
+        "The problems stay open for practice, and the community feed now has everyone's accepted code for them.",
+      ],
+      button: { label: "See the scoreboard", href: url },
+      footnote: optOut(unsubscribeToken, "contestReminders", "you took part in this contest"),
+    }),
+    text: [`Hi ${name},`, "", `${contest.title} is over. ${placed}, with ${score} points from ${solved}.`, url].join("\n"),
+  };
+};
+
+/** The week, in four numbers and a short list. */
+const weeklyDigest = ({
+  name,
+  solvedThisWeek,
+  streakDays,
+  gems,
+  newProblems,
+  upcomingContests,
+  unsubscribeToken,
+}: {
+  name: string;
+  solvedThisWeek: number;
+  streakDays: number;
+  gems: number;
+  newProblems: { title: string; slug: string; difficulty: string }[];
+  upcomingContests: { title: string; slug: string; startTime: Date }[];
+  unsubscribeToken?: string;
+}): BuiltMail => {
+  const problemList = newProblems
+    .map((problem) => `<a href="${site()}/problems/${problem.slug}" style="color:${ACCENT};text-decoration:none;">${escape(problem.title)}</a> · ${escape(problem.difficulty.toLowerCase())}`)
+    .join("<br>");
+  const contestList = upcomingContests
+    .map((contest) => `<a href="${site()}/contests/${contest.slug}" style="color:${ACCENT};text-decoration:none;">${escape(contest.title)}</a> · ${escape(contest.startTime.toUTCString())}`)
+    .join("<br>");
+
+  return {
+    subject: solvedThisWeek ? `You solved ${solvedThisWeek} this week` : "Your week on Kaimana",
+    html: layout({
+      heading: solvedThisWeek ? `${solvedThisWeek} solved this week` : "Nothing solved this week",
+      lines: [
+        `Hi ${escape(name)}.`,
+        streakDays > 0
+          ? `Your streak is at ${streakDays} ${streakDays === 1 ? "day" : "days"}, and you have ${gems} gems.`
+          : `You have ${gems} gems waiting to be spent on hints.`,
+        ...(problemList ? [`<b style="color:#E8EAED;">New problems</b><br>${problemList}`] : []),
+        ...(contestList ? [`<b style="color:#E8EAED;">Coming up</b><br>${contestList}`] : []),
+      ],
+      button: { label: "Pick your next problem", href: `${site()}/problems` },
+      footnote: optOut(unsubscribeToken, "weeklyDigest", "you asked for a weekly summary"),
+    }),
+    text: [
+      `Hi ${name},`,
+      "",
+      `Solved this week: ${solvedThisWeek}. Streak: ${streakDays} days. Gems: ${gems}.`,
+      ...(newProblems.length ? ["", "New problems:", ...newProblems.map((problem) => `- ${problem.title} (${problem.difficulty.toLowerCase()}) ${site()}/problems/${problem.slug}`)] : []),
+      ...(upcomingContests.length ? ["", "Coming up:", ...upcomingContests.map((contest) => `- ${contest.title} ${contest.startTime.toUTCString()}`)] : []),
+    ].join("\n"),
+  };
+};
+
+export const mailTemplates = {
+  passwordReset,
+  passwordChanged,
+  passwordResetGoogleAccount,
+  welcome,
+  notification,
+  contestReminder,
+  contestResults,
+  weeklyDigest,
+};
