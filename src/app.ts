@@ -22,6 +22,7 @@ import { kidsRouter } from "./modules/kids/kids.route.js";
 import { proposalRouter } from "./modules/proposal/proposal.route.js";
 import { notificationRouter } from "./modules/notification/notification.route.js";
 import { mailRouter } from "./modules/mail/mail.route.js";
+import { searchRouter } from "./modules/search/search.route.js";
 import { mailService } from "./modules/mail/mail.service.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
@@ -95,6 +96,7 @@ app.use("/api/kids", kidsRouter);
 app.use("/api/proposals", proposalRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/mail", mailRouter);
+app.use("/api/search", searchRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);
