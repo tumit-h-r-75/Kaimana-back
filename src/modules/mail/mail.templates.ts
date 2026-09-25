@@ -181,6 +181,22 @@ const notification = ({ name, title, body, href }: { name: string; title: string
   };
 };
 
+/** Proof that the address on an account can actually receive mail. */
+const verifyEmail = ({ name, url, minutes }: { name: string; url: string; minutes: number }): BuiltMail => ({
+  subject: "Confirm your email for Kaimana",
+  html: layout({
+    heading: "Confirm this address",
+    lines: [
+      `Hi ${escape(name)}, one click and this address is confirmed on your Kaimana account.`,
+      `The link works once and expires in ${minutes} minutes.`,
+      "Confirming means a password reset can actually reach you, and that contest mail goes where you expect.",
+    ],
+    button: { label: "Confirm my email", href: url },
+    footnote: "If you did not create a Kaimana account, ignore this — nothing happens until the link is used.",
+  }),
+  text: [`Hi ${name},`, "", "Confirm your email address for Kaimana:", url, "", `The link works once and expires in ${minutes} minutes.`].join("\n"),
+});
+
 /** A contest someone registered for is about to start. */
 const contestReminder = ({
   name,
@@ -298,6 +314,7 @@ const weeklyDigest = ({
 };
 
 export const mailTemplates = {
+  verifyEmail,
   passwordReset,
   passwordChanged,
   passwordResetGoogleAccount,

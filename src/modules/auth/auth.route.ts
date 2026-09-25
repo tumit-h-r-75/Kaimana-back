@@ -25,5 +25,8 @@ router.post("/change-password", requireAuth, authController.changePassword);
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
 router.patch("/me/email-preferences", requireAuth, authController.updateEmailPreferences);
+// Public: the link is opened from a mail client, which has no session.
+router.post("/verify-email", authController.verifyEmail);
+router.post("/resend-verification", requireAuth, authController.resendVerification);
 
 export const authRouter = router;

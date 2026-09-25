@@ -6,6 +6,7 @@ import { googleClient } from "../../integrations/google/googleAuth.js";
 import { cloudinaryService } from "../../integrations/cloudinary/cloudinary.service.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
 import { PasswordResetModel } from "../../models/PasswordReset.model.js";
+import { EmailVerificationModel } from "../../models/EmailVerification.model.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ProblemModel } from "../../models/Problem.model.js";
 import { AppError } from "../../utils/errors.js";
@@ -194,6 +195,9 @@ const registerWithPassword = async ({ name, email, password, avatarBuffer }: { n
         ...(profilePicUrl ? { profilePicUrl } : {}),
     });
     void mailService.deliver(user.email, mailTemplates.welcome({ name: user.name }));
+    // The confirmation goes out with the welcome; neither may hold up the
+    // response that hands back the new session.
+    void sendEmailVerification(user._id);
     return { user: toSafeUser(user), ...issueTokens(user), isNewUser: true };
 };
 const loginWithPassword = async ({ email, password }: { email?: unknown; password?: unknown }) => {
@@ -382,4 +386,52 @@ const updateEmailPreferences = async ({ userId, contestReminders, weeklyDigest }
     return { emailPrefs: { contestReminders: user.emailPrefs?.contestReminders !== false, weeklyDigest: user.emailPrefs?.weeklyDigest !== false } };
 };
 
-export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword, requestPasswordReset, resetPassword, updateEmailPreferences };
+// ---------------------------------------------------------- email verify
+
+const EMAIL_VERIFY_MINUTES = 60 * 24;
+const MAX_VERIFY_SENDS_PER_HOUR = 3;
+
+/**
+ * Issues a confirmation link. Quiet on every path that is not worth telling
+ * the caller about — already verified, no address, a mail provider having a
+ * bad minute — because this is called from registration, where the account
+ * has already been created and the response is about the account.
+ */
+const sendEmailVerification = async (userId: unknown) => {
+    const user = await UserModel.findById(String(userId ?? ""));
+    if (!user?.email || user.emailVerifiedAt) return;
+
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    if ((await EmailVerificationModel.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } })) >= MAX_VERIFY_SENDS_PER_HOUR) return;
+
+    const token = randomBytes(32).toString("base64url");
+    await EmailVerificationModel.create({
+        userId: user._id,
+        email: user.email,
+        tokenHash: hashResetToken(token),
+        expiresAt: new Date(Date.now() + EMAIL_VERIFY_MINUTES * 60 * 1000),
+    });
+    const url = `${config.frontendUrls[0] ?? ""}/verify-email?token=${token}`;
+    await mailService.deliver(user.email, mailTemplates.verifyEmail({ name: user.name, url, minutes: EMAIL_VERIFY_MINUTES }), { urgent: true });
+};
+
+/** Spends a confirmation link. */
+const verifyEmail = async ({ token }: { token?: unknown }) => {
+    if (typeof token !== "string" || !token) throw new AppError("This confirmation link is not valid.", 400);
+
+    const claimed = await EmailVerificationModel.findOneAndUpdate(
+        { tokenHash: hashResetToken(token), usedAt: { $exists: false }, expiresAt: { $gt: new Date() } },
+        { $set: { usedAt: new Date() } },
+    );
+    if (!claimed) throw new AppError("This confirmation link has expired or has already been used. Ask for a new one.", 400);
+
+    // The address is checked as well as the owner: a link issued before
+    // someone changed their email must not confirm the new one.
+    const user = await UserModel.findOne({ _id: claimed.userId, email: claimed.email });
+    if (!user) throw new AppError("This confirmation link is for a different address. Ask for a new one.", 400);
+
+    if (!user.emailVerifiedAt) await UserModel.updateOne({ _id: user._id }, { $set: { emailVerifiedAt: new Date() } });
+    return { email: user.email, verifiedAt: user.emailVerifiedAt ?? new Date() };
+};
+
+export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword, requestPasswordReset, resetPassword, updateEmailPreferences, sendEmailVerification, verifyEmail };

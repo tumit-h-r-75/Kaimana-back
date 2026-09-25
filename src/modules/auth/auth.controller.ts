@@ -176,6 +176,18 @@ const updateEmailPreferences = catchAsync(async (req, res) => {
     sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Email preferences updated", data: result });
 });
 
+const verifyEmail = catchAsync(async (req, res) => {
+    const result = await authService.verifyEmail({ token: req.body?.token });
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Email confirmed", data: result });
+});
+
+const resendVerification = catchAsync(async (req, res) => {
+    await authService.sendEmailVerification((req as AuthenticatedRequest).user?._id);
+    // Always the same answer: whether a link went out depends on state the
+    // caller does not need reported back to them.
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "If that account still needs confirming, a link is on its way.", data: null });
+});
+
 export const authController = {
     googleClientConfig,
     googleAuth,
@@ -189,4 +201,6 @@ export const authController = {
     forgotPassword,
     resetPassword,
     updateEmailPreferences,
+    verifyEmail,
+    resendVerification,
 };

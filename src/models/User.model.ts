@@ -26,6 +26,8 @@ export interface IUser {
   // something they just did — a reset link, a password change — are not
   // listed here and always send.
   emailPrefs?: { contestReminders: boolean; weeklyDigest: boolean };
+  /** When this address was confirmed from a link sent to it. */
+  emailVerifiedAt?: Date;
   // Lets an unsubscribe link work from an inbox, with no session. Random,
   // per user, and only ever turns mail off.
   unsubscribeToken?: string;
@@ -93,6 +95,8 @@ const userSchema = new Schema<IUser>(
       contestReminders: { type: Boolean, default: true },
       weeklyDigest: { type: Boolean, default: true },
     },
+
+    emailVerifiedAt: { type: Date },
 
     unsubscribeToken: { type: String, index: true, select: false },
   },
