@@ -9,6 +9,7 @@ import { hintService } from "./hint.service.js";
 import { auditService } from "./audit.service.js";
 import { refactorService } from "./refactor.service.js";
 import { testgenService } from "./testgen.service.js";
+import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
 // behavior, but this keeps a single user from hammering the Gemini API.
@@ -48,12 +49,12 @@ const getHint = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   }
   recentHintRequests.set(userId, [...requests, now]);
 
-  const { problemId, level, code } = req.body as { problemId?: string; level?: number; code?: string };
+  const { problemId, level, code, language } = req.body as { problemId?: string; level?: number; code?: string; language?: string };
   if (!problemId) throw new AppError("problemId is required.", 400);
 
   // role comes from requireAuth's live user lookup — admins may request
   // hints on unpublished drafts, everyone else gets a 404 for them.
-  const result = await hintService.getHint({ userId, problemId, level: level ?? 1, code, role: req.user?.role });
+  const result = await hintService.getHint({ userId, problemId, level: level ?? 1, code, role: req.user?.role, language: resolveAiLanguage(language) });
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Hint generated", data: result });
 });
 

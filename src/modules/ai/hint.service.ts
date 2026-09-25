@@ -13,6 +13,7 @@ import { ProblemModel, type IProblem } from "../../models/Problem.model.js";
 import { HintUnlockModel } from "../../models/HintUnlock.model.js";
 import { AppError } from "../../utils/errors.js";
 import { askAi } from "./ai.service.js";
+import type { AiLanguageCode } from "./aiLanguage.js";
 
 const MAX_HINT_LEVEL = 3;
 
@@ -105,12 +106,14 @@ export const getHint = async ({
   level,
   code,
   role,
+  language,
 }: {
   userId: string;
   problemId: string;
   level: number;
   code?: string;
   role?: string;
+  language?: AiLanguageCode;
 }) => {
   const requestedLevel = Math.min(Math.max(Math.trunc(level) || 1, 1), MAX_HINT_LEVEL);
 
@@ -172,7 +175,7 @@ ${code?.trim() ? `The learner's current code attempt:\n${code.trim().slice(0, 20
 
 Give exactly one level-${safeLevel} hint.`;
 
-  const aiHint = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 700 });
+  const aiHint = await askAi({ system: SYSTEM_PROMPT, prompt, maxTokens: 700, language });
 
   return {
     level: safeLevel,
