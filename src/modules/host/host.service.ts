@@ -271,12 +271,14 @@ const reviewRequest = async (requestId: string, reviewerId: string, payload: unk
     request.userId,
     action === "approve"
       ? {
+          email: true,
           type: "host.approved",
           title: "You can host contests now",
           body: `Your request to run "${request.contestTitle}" was approved.${note ? ` ${note}` : ""}`,
           href: "/admin/contests",
         }
       : {
+          email: true,
           type: "host.rejected",
           title: "Your host request was declined",
           body: `"${request.contestTitle}"${note ? ` — ${note}` : ""}`,

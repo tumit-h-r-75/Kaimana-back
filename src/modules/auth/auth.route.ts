@@ -19,5 +19,10 @@ router.post("/logout", authController.logout);
 router.get("/me", requireAuth, authController.me);
 router.patch("/me", requireAuth, avatarUpload, authController.updateProfile);
 router.post("/change-password", requireAuth, authController.changePassword);
+// Both are public by necessity: someone who cannot sign in is the only
+// person who needs them. Abuse is bounded in the service (three links per
+// account per hour) rather than by a session.
+router.post("/forgot-password", authController.forgotPassword);
+router.post("/reset-password", authController.resetPassword);
 
 export const authRouter = router;

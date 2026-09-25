@@ -5,12 +5,15 @@ import { config } from "../../config/env.js";
 import { googleClient } from "../../integrations/google/googleAuth.js";
 import { cloudinaryService } from "../../integrations/cloudinary/cloudinary.service.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
+import { PasswordResetModel } from "../../models/PasswordReset.model.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ProblemModel } from "../../models/Problem.model.js";
 import { AppError } from "../../utils/errors.js";
 import { jwtUtils } from "../../utils/jwt.js";
 import { gemsForDifficulty } from "../../utils/gems.js";
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "crypto";
+import { mailService } from "../mail/mail.service.js";
+import { mailTemplates } from "../mail/mail.templates.js";
+import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 
 const scrypt = promisify(scryptCallback);
@@ -190,6 +193,7 @@ const registerWithPassword = async ({ name, email, password, avatarBuffer }: { n
         status: "active",
         ...(profilePicUrl ? { profilePicUrl } : {}),
     });
+    void mailService.deliver(user.email, mailTemplates.welcome({ name: user.name }));
     return { user: toSafeUser(user), ...issueTokens(user), isNewUser: true };
 };
 const loginWithPassword = async ({ email, password }: { email?: unknown; password?: unknown }) => {
@@ -299,4 +303,72 @@ const changePassword = async ({ userId, currentPassword, newPassword }: { userId
     return issueTokens(updated);
 };
 
-export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword };
+// ------------------------------------------------------------ password reset
+
+// Long enough to find the mail and act on it, short enough that a link left
+// in an inbox is not a standing key to the account.
+const PASSWORD_RESET_MINUTES = 30;
+const MAX_RESET_REQUESTS_PER_HOUR = 3;
+
+// The token goes in the link; only its hash is stored, the way a password is
+// — a dump of the collection hands an attacker nothing they can put in a URL.
+const hashResetToken = (token: string) => createHash("sha256").update(token).digest("hex");
+
+/**
+ * Starts a reset. Resolves the same way whatever happens, because a reply
+ * that differed would let anyone test which addresses have accounts here.
+ */
+const requestPasswordReset = async ({ email, requestedFrom }: { email?: unknown; requestedFrom?: string }) => {
+    if (typeof email !== "string" || !/^\S+@\S+\.\S+$/.test(email)) throw new AppError("Enter the email address on the account.", 400);
+    const user = await UserModel.findOne({ email: email.toLowerCase().trim() }).select("+passwordHash");
+    if (!user || (user as unknown as { status?: string }).status === "blocked") return;
+
+    // A Google account has no password to reset. Saying so in the mail keeps
+    // it out of the response, which anyone can read.
+    if (!user.passwordHash) {
+        await mailService.deliver(user.email, mailTemplates.passwordResetGoogleAccount({ name: user.name }), { urgent: true });
+        return;
+    }
+
+    // The rate limit lives in the database rather than in memory: this runs
+    // as serverless instances that share nothing between them.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    if ((await PasswordResetModel.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } })) >= MAX_RESET_REQUESTS_PER_HOUR) return;
+
+    const token = randomBytes(32).toString("base64url");
+    await PasswordResetModel.create({
+        userId: user._id,
+        tokenHash: hashResetToken(token),
+        expiresAt: new Date(Date.now() + PASSWORD_RESET_MINUTES * 60 * 1000),
+        requestedFrom,
+    });
+    const url = `${config.frontendUrls[0] ?? ""}/reset-password?token=${token}`;
+    await mailService.deliver(user.email, mailTemplates.passwordReset({ name: user.name, url, minutes: PASSWORD_RESET_MINUTES }), { urgent: true });
+};
+
+/** Spends a reset link and sets the new password. */
+const resetPassword = async ({ token, newPassword }: { token?: unknown; newPassword?: unknown }) => {
+    if (typeof token !== "string" || !token) throw new AppError("This reset link is not valid.", 400);
+    if (typeof newPassword !== "string" || newPassword.length < 8) throw new AppError("New password must be at least 8 characters.", 400);
+
+    // Claimed before anything changes, and only if still unused: two clicks
+    // on the same link race here, and exactly one of them wins.
+    const claimed = await PasswordResetModel.findOneAndUpdate(
+        { tokenHash: hashResetToken(token), usedAt: { $exists: false }, expiresAt: { $gt: new Date() } },
+        { $set: { usedAt: new Date() } },
+    );
+    if (!claimed) throw new AppError("This reset link has expired or has already been used. Ask for a new one.", 400);
+
+    const user = await UserModel.findById(claimed.userId);
+    if (!user) throw new AppError("This reset link is not valid.", 400);
+
+    // Bumping tokenVersion signs out every device, which is the point: a
+    // reset is what someone does when the account may not be theirs alone.
+    await UserModel.updateOne({ _id: user._id }, { $set: { passwordHash: await hashPassword(newPassword) }, $inc: { tokenVersion: 1 } });
+    // Any other link still outstanding for this account dies with it.
+    await PasswordResetModel.deleteMany({ userId: user._id, usedAt: { $exists: false } });
+    // Not urgent, but it is how someone finds out their account was taken.
+    await mailService.deliver(user.email, mailTemplates.passwordChanged({ name: user.name }));
+};
+
+export const authService = { googleAuthIntoDb, registerWithPassword, loginWithPassword, refreshToken, getUserById, updateProfile, changePassword, requestPasswordReset, resetPassword };

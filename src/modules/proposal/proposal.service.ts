@@ -637,6 +637,7 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
     });
     const rejected = (await ProblemProposalModel.findById(proposal._id).lean()) as unknown as LeanProposal;
     await notificationService.notifyUser(rejected.userId, {
+      email: true,
       type: "proposal.rejected",
       title: "Your proposal was not accepted",
       body: `"${rejected.title}"${rejected.gemsRefunded ? ` — ${rejected.gemsRefunded} gems came back to you` : ""}.${note ? ` ${note}` : ""}`,
@@ -734,6 +735,7 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
 
   const accepted = (await ProblemProposalModel.findById(proposal._id).lean()) as unknown as LeanProposal;
   await notificationService.notifyUser(accepted.userId, {
+    email: true,
     type: "proposal.accepted",
     title: "Your proposal was accepted",
     body: publish

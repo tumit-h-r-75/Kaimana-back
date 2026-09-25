@@ -159,6 +159,18 @@ const changePassword = catchAsync(async (req: AuthenticatedRequest, res) => {
     sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Password updated", data: tokens });
 });
 
+// Always the same answer, whether or not the address has an account — see
+// authService.requestPasswordReset.
+const forgotPassword = catchAsync(async (req, res) => {
+    await authService.requestPasswordReset({ email: req.body?.email, requestedFrom: req.ip });
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "If that address has an account, a reset link is on its way.", data: null });
+});
+
+const resetPassword = catchAsync(async (req, res) => {
+    await authService.resetPassword({ token: req.body?.token, newPassword: req.body?.newPassword });
+    sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Your password has been changed. Sign in with it.", data: null });
+});
+
 export const authController = {
     googleClientConfig,
     googleAuth,
@@ -169,4 +181,6 @@ export const authController = {
     me,
     updateProfile,
     changePassword,
+    forgotPassword,
+    resetPassword,
 };

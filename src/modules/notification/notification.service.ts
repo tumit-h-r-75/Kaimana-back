@@ -8,12 +8,21 @@
 import { Types } from "mongoose";
 import { NotificationModel, type NotificationType } from "../../models/Notification.model.js";
 import { UserModel } from "../../models/User.model.js";
+import { mailService } from "../mail/mail.service.js";
+import { mailTemplates } from "../mail/mail.templates.js";
 
 export interface NotificationInput {
   type: NotificationType;
   title: string;
   body?: string;
   href?: string;
+  /**
+   * Also send this to the user's inbox. For the few events someone would
+   * want to hear about while they are not on the site — a decision on
+   * something they submitted, a change to their account — not for routine
+   * chatter, which belongs in the bell only.
+   */
+  email?: boolean;
 }
 
 const MAX_LIMIT = 50;
@@ -26,10 +35,31 @@ const clip = (text: unknown, max: number) => {
 };
 
 const create = async (doc: Record<string, unknown>) => {
+  const { email, ...notification } = doc;
   try {
-    await NotificationModel.create({ ...doc, title: clip(doc.title, 140), body: clip(doc.body, 400) });
+    await NotificationModel.create({ ...notification, title: clip(notification.title, 140), body: clip(notification.body, 400) });
   } catch (error) {
     console.error("Could not record a notification:", error);
+  }
+  // Queued, never awaited, and never allowed to throw: the action that
+  // caused this has already happened.
+  if (email && notification.audience === "user") {
+    try {
+      const user = await UserModel.findById(notification.userId).select("name email").lean<{ name?: string; email?: string } | null>();
+      if (user?.email) {
+        void mailService.deliver(
+          user.email,
+          mailTemplates.notification({
+            name: user.name ?? "there",
+            title: clip(notification.title, 140),
+            body: clip(notification.body, 400) || undefined,
+            href: typeof notification.href === "string" ? notification.href : undefined,
+          }),
+        );
+      }
+    } catch (error) {
+      console.error("Could not queue a notification email:", error);
+    }
   }
 };
 

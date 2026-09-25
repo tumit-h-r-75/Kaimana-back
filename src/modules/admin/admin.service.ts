@@ -130,9 +130,10 @@ const updateUser = async (targetUserId: string, requestingUserId: string, payloa
       guest: { title: "You can host contests now", body: "The contest manager is open to you.", href: "/admin/contests" },
       user: { title: "Your role changed", body: "Your account is a regular learner account now.", href: "/profile" },
     } as const;
-    await notificationService.notifyUser(targetUserId, { type: "role.changed", ...byRole[payload.role] });
+    await notificationService.notifyUser(targetUserId, { email: true, type: "role.changed", ...byRole[payload.role] });
   } else if (payload.status === "active") {
     await notificationService.notifyUser(targetUserId, {
+      email: true,
       type: "role.changed",
       title: "Your account is active again",
       body: "Welcome back — everything is open to you.",

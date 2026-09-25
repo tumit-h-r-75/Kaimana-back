@@ -21,6 +21,8 @@ import { hostRequestRouter } from "./modules/host/host.route.js";
 import { kidsRouter } from "./modules/kids/kids.route.js";
 import { proposalRouter } from "./modules/proposal/proposal.route.js";
 import { notificationRouter } from "./modules/notification/notification.route.js";
+import { mailRouter } from "./modules/mail/mail.route.js";
+import { mailService } from "./modules/mail/mail.service.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
@@ -70,6 +72,14 @@ app.get("/api/auth/google/client-config", authController.googleClientConfig);
 
 // All remaining application routes require an active database connection.
 app.use(requireDatabase);
+// Queued mail moves on the back of ordinary traffic as well as on the
+// schedule: a serverless deployment has no worker of its own, and one cron
+// run a day is not often enough for a password-reset retry. The call is
+// rate-limited to once a minute per instance and is never awaited.
+app.use((_req, _res, next) => {
+  mailService.flushInBackground();
+  next();
+});
 app.use("/api/auth", authRouter);
 app.use("/api/problems", problemRouter);
 app.use("/api/submissions", submissionRouter);
@@ -84,6 +94,7 @@ app.use("/api/host-requests", hostRequestRouter);
 app.use("/api/kids", kidsRouter);
 app.use("/api/proposals", proposalRouter);
 app.use("/api/notifications", notificationRouter);
+app.use("/api/mail", mailRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);

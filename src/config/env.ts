@@ -51,6 +51,17 @@ const envSchema = z.object({
   // whole extra Judge0 submission that runs far slower than the plain one,
   // and the default judge is a shared public instance.
   FEATURE_EXECUTION_VISUALIZER: z.enum(["true", "false"]).default("false"),
+  // Email (see modules/mail). Optional: with no key the mail service prints
+  // messages to the log instead of sending them, so the password-reset flow
+  // is still testable locally and nothing crashes in a deployment that has
+  // not been given an account yet.
+  RESEND_API_KEY: optionalString,
+  // Must be an address at a domain verified in Resend. Their sandbox sender
+  // works without a domain but only delivers to the account owner.
+  MAIL_FROM: optionalString,
+  MAIL_REPLY_TO: optionalString,
+  // Shared secret for the scheduled flush of the mail outbox.
+  MAIL_CRON_SECRET: optionalString,
   JWT_ACCESS_SECRET: z.string().min(1, "JWT_ACCESS_SECRET is required"),
   JWT_REFRESH_SECRET: z.string().min(1, "JWT_REFRESH_SECRET is required"),
   JWT_ACCESS_EXPIRES_IN: z.string().min(1, "JWT_ACCESS_EXPIRES_IN is required"),
@@ -87,6 +98,10 @@ export const config = {
   cloudinaryApiKey: env.CLOUDINARY_API_KEY,
   cloudinaryApiSecret: env.CLOUDINARY_API_SECRET,
   executionVisualizerEnabled: env.FEATURE_EXECUTION_VISUALIZER === "true",
+  resendApiKey: env.RESEND_API_KEY,
+  mailFrom: env.MAIL_FROM ?? "Kaimana <onboarding@resend.dev>",
+  mailReplyTo: env.MAIL_REPLY_TO,
+  mailCronSecret: env.MAIL_CRON_SECRET,
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
   jwtRefreshSecret: env.JWT_REFRESH_SECRET,
   jwtAccessExpiresIn: env.JWT_ACCESS_EXPIRES_IN,
