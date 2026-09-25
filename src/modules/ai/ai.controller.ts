@@ -12,6 +12,7 @@ import { testgenService } from "./testgen.service.js";
 import { explainService } from "./explain.service.js";
 import { followUpService } from "./followUp.service.js";
 import { explainSolutionService } from "./explainSolution.service.js";
+import { proposalReviewService } from "./proposalReview.service.js";
 import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
@@ -134,6 +135,32 @@ const explainSolution = catchAsync(async (req: AuthenticatedRequest, res: Respon
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Solution explained", data: result });
 });
 
+// A draft review is one long model call, and an author will run it a few
+// times as they edit — often enough to want its own modest limit.
+const recentProposalReviews = new Map<string, number[]>();
+const PROPOSAL_REVIEW_LIMIT_PER_MINUTE = 4;
+
+const reviewProposalDraft = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  const now = Date.now();
+  const requests = (recentProposalReviews.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (requests.length >= PROPOSAL_REVIEW_LIMIT_PER_MINUTE) {
+    throw new AppError("Too many reviews. Try again in a minute.", 429);
+  }
+  recentProposalReviews.set(userId, [...requests, now]);
+
+  const { title, statement, constraints, difficulty, testCases, language } = req.body as Record<string, unknown>;
+  const result = await proposalReviewService.reviewProposalDraft({
+    title,
+    statement,
+    constraints,
+    difficulty,
+    testCases,
+    language: resolveAiLanguage(language),
+  });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Draft reviewed", data: result });
+});
+
 const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
   const now = Date.now();
@@ -203,6 +230,7 @@ export const aiController = {
   getHint,
   explainFailure,
   explainSolution,
+  reviewProposalDraft,
   askFollowUps,
   markFollowUp,
   runAudit,
