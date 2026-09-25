@@ -205,6 +205,7 @@ export const deleteComment = async (commentId: string, userId: string, isAdmin: 
 };
 
 export const communityService = {
+  getVisibleFilter: getCommunityVisibleFilter,
   getFeed,
   getSubmissionDetail,
   listComments,

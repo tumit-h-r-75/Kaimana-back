@@ -23,6 +23,7 @@ import { proposalRouter } from "./modules/proposal/proposal.route.js";
 import { notificationRouter } from "./modules/notification/notification.route.js";
 import { mailRouter } from "./modules/mail/mail.route.js";
 import { searchRouter } from "./modules/search/search.route.js";
+import { publicProfileRouter } from "./modules/profile/publicProfile.route.js";
 import { mailService } from "./modules/mail/mail.service.js";
 import { requireDatabase } from "./middleware/database.middleware.js";
 
@@ -97,6 +98,7 @@ app.use("/api/proposals", proposalRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/mail", mailRouter);
 app.use("/api/search", searchRouter);
+app.use("/api/users", publicProfileRouter);
 
 // Must be LAST: catches unmatched routes, then catches all errors
 app.use(notFoundHandler);
