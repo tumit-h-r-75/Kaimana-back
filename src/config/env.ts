@@ -59,6 +59,13 @@ const envSchema = z.object({
   // Brevo verifies a single sender address rather than a whole domain, so
   // it can write to anyone without one. Preferred when both are set.
   BREVO_API_KEY: optionalString,
+  // Plain SMTP — a Gmail account with an app password, for instance. The
+  // slowest of the three on a cold start, and the only one that needs
+  // neither a verified domain nor a new account anywhere.
+  SMTP_HOST: optionalString,
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_USER: optionalString,
+  SMTP_PASS: optionalString,
   // Must be an address at a domain verified in Resend. Their sandbox sender
   // works without a domain but only delivers to the account owner.
   MAIL_FROM: optionalString,
@@ -105,6 +112,15 @@ export const config = {
   executionVisualizerEnabled: env.FEATURE_EXECUTION_VISUALIZER === "true",
   resendApiKey: env.RESEND_API_KEY,
   brevoApiKey: env.BREVO_API_KEY,
+  smtp:
+    env.SMTP_USER && env.SMTP_PASS
+      ? {
+          host: env.SMTP_HOST ?? "smtp.gmail.com",
+          port: env.SMTP_PORT ?? 587,
+          user: env.SMTP_USER,
+          pass: env.SMTP_PASS,
+        }
+      : undefined,
   mailFrom: env.MAIL_FROM ?? "Kaimana <onboarding@resend.dev>", // override in every deployment
   mailReplyTo: env.MAIL_REPLY_TO,
   mailCronSecret: env.MAIL_CRON_SECRET,

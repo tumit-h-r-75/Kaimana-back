@@ -8,15 +8,20 @@
 // Two providers, because the choice has a real consequence for who can be
 // written to:
 //
-//   Resend  — until a domain is verified, it refuses every recipient except
-//             the account holder's own address. Good once a domain exists.
+//   SMTP    — an ordinary mailbox with an app password (Gmail, say). Needs
+//             no domain and no new account; the slowest to open, and capped
+//             by whatever the mailbox allows per day.
 //   Brevo   — verifies a single sender address instead of a whole domain, so
 //             mail reaches anyone from the day it is set up.
+//   Resend  — until a domain is verified, it refuses every recipient except
+//             the account holder's own address. Good once a domain exists.
 //
-// Brevo wins when both are set, because "reaches everyone" beats "reaches
-// one person". With neither, the message is printed to the log, so local
-// development works without an account and nothing is silently dropped.
+// They are tried in that order, because that is the order of "can actually
+// write to a stranger". With none configured the message is printed to the
+// log, so local development works without an account and nothing is
+// silently dropped.
 
+import nodemailer from "nodemailer";
 import { config } from "../../config/env.js";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -35,9 +40,10 @@ export class PermanentMailError extends Error {
   readonly permanent = true;
 }
 
-export type MailProvider = "brevo" | "resend" | "console";
+export type MailProvider = "smtp" | "brevo" | "resend" | "console";
 
 export const activeProvider = (): MailProvider => {
+  if (config.smtp) return "smtp";
   if (config.brevoApiKey) return "brevo";
   if (config.resendApiKey) return "resend";
   return "console";
@@ -113,9 +119,50 @@ const sendThroughBrevo = async (mail: OutgoingMail): Promise<string> => {
   return String(parsed.messageId ?? "sent");
 };
 
+/**
+ * One connection per message. Pooling a transport is pointless here: a
+ * serverless instance is frozen between requests, and a socket it was
+ * holding is dead by the time the next one arrives.
+ */
+const sendThroughSmtp = async (mail: OutgoingMail): Promise<string> => {
+  const smtp = config.smtp;
+  if (!smtp) throw new PermanentMailError("SMTP is not configured.");
+  const transport = nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    // 465 is implicit TLS; 587 starts plain and upgrades with STARTTLS.
+    secure: smtp.port === 465,
+    auth: { user: smtp.user, pass: smtp.pass },
+    connectionTimeout: TIMEOUT_MS,
+    greetingTimeout: TIMEOUT_MS,
+    socketTimeout: TIMEOUT_MS,
+  });
+  try {
+    const info = await transport.sendMail({
+      from: config.mailFrom,
+      to: mail.to,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+      ...(config.mailReplyTo ? { replyTo: config.mailReplyTo } : {}),
+    });
+    return info.messageId ?? "sent";
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    // A rejected login or a refused sender will be refused identically next
+    // time; a dropped connection is worth retrying.
+    const code = (error as { responseCode?: number }).responseCode ?? 0;
+    throw code >= 500 && code < 600 ? new PermanentMailError(reason) : new Error(reason);
+  } finally {
+    transport.close();
+  }
+};
+
 /** Resolves with the provider's message id, or throws with its reason. */
 export const sendMail = async (mail: OutgoingMail): Promise<string> => {
   switch (activeProvider()) {
+    case "smtp":
+      return sendThroughSmtp(mail);
     case "brevo":
       return sendThroughBrevo(mail);
     case "resend":
