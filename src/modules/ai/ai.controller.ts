@@ -13,6 +13,7 @@ import { explainService } from "./explain.service.js";
 import { followUpService } from "./followUp.service.js";
 import { explainSolutionService } from "./explainSolution.service.js";
 import { proposalReviewService } from "./proposalReview.service.js";
+import { codeQualityService } from "./codeQuality.service.js";
 import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
@@ -161,6 +162,24 @@ const reviewProposalDraft = catchAsync(async (req: AuthenticatedRequest, res: Re
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Draft reviewed", data: result });
 });
 
+const scoreCodeQuality = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  const now = Date.now();
+  const requests = (recentExplainRequests.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (requests.length >= EXPLAIN_LIMIT_PER_MINUTE) throw new AppError("Too many requests. Try again in a minute.", 429);
+  recentExplainRequests.set(userId, [...requests, now]);
+
+  const { submissionId, language } = req.body as { submissionId?: string; language?: string };
+  if (!submissionId) throw new AppError("submissionId is required.", 400);
+  const result = await codeQualityService.scoreSubmission({ userId, submissionId, language: resolveAiLanguage(language) });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Code reviewed", data: result });
+});
+
+const codeQualityHistory = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const result = await codeQualityService.qualityHistory(String(req.user?._id));
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Code quality over time", data: result });
+});
+
 const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
   const now = Date.now();
@@ -231,6 +250,8 @@ export const aiController = {
   explainFailure,
   explainSolution,
   reviewProposalDraft,
+  scoreCodeQuality,
+  codeQualityHistory,
   askFollowUps,
   markFollowUp,
   runAudit,
