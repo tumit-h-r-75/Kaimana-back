@@ -32,11 +32,14 @@
 // actually ran.
 
 import { config } from "../../config/env.js";
+import { languageInstruction, type AiLanguageCode } from "./aiLanguage.js";
 
 export interface AskAiOptions {
   system: string;
   prompt: string;
   maxTokens?: number;
+  /** What language to answer in. Defaults to English. */
+  language?: AiLanguageCode;
 }
 
 export const isAiConfigured = () => Boolean(config.groqApiKey || config.geminiApiKey);
@@ -213,6 +216,11 @@ const askGemini = async ({ system, prompt, maxTokens = 400 }: AskAiOptions): Pro
 };
 
 export const askAi = async (options: AskAiOptions): Promise<string | null> => {
+  // The language belongs in the system prompt, not the user's: it is an
+  // instruction about how to answer, not part of what was asked.
+  const instruction = languageInstruction(options.language ?? "en");
+  if (instruction) options = { ...options, system: options.system + instruction };
+
   if (config.groqApiKey) {
     const result = await askGroq(options);
     // Genuinely fall back to Gemini when Groq is configured but the call
