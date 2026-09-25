@@ -10,6 +10,7 @@ import { auditService } from "./audit.service.js";
 import { refactorService } from "./refactor.service.js";
 import { testgenService } from "./testgen.service.js";
 import { explainService } from "./explain.service.js";
+import { followUpService } from "./followUp.service.js";
 import { resolveAiLanguage } from "./aiLanguage.js";
 
 // A learner asking for hints repeatedly in a short window is expected
@@ -81,6 +82,41 @@ const explainFailure = catchAsync(async (req: AuthenticatedRequest, res: Respons
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Failure explained", data: result });
 });
 
+// Two model calls per set of questions at most, and answering is the slow
+// part, so this sits between the hint limiter and the audit one.
+const recentFollowUpRequests = new Map<string, number[]>();
+const FOLLOW_UP_LIMIT_PER_MINUTE = 8;
+
+const guardFollowUps = (userId: string) => {
+  const now = Date.now();
+  const requests = (recentFollowUpRequests.get(userId) ?? []).filter((time) => now - time < 60_000);
+  if (requests.length >= FOLLOW_UP_LIMIT_PER_MINUTE) throw new AppError("Too many requests. Try again in a minute.", 429);
+  recentFollowUpRequests.set(userId, [...requests, now]);
+};
+
+const askFollowUps = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  guardFollowUps(userId);
+  const { submissionId, language } = req.body as { submissionId?: string; language?: string };
+  if (!submissionId) throw new AppError("submissionId is required.", 400);
+  const result = await followUpService.askFollowUps({ userId, submissionId, language: resolveAiLanguage(language) });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Follow-up questions", data: result });
+});
+
+const markFollowUp = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?._id);
+  guardFollowUps(userId);
+  const { submissionId, question, answer, language } = req.body as {
+    submissionId?: string;
+    question?: string;
+    answer?: string;
+    language?: string;
+  };
+  if (!submissionId) throw new AppError("submissionId is required.", 400);
+  const result = await followUpService.markFollowUp({ userId, submissionId, question, answer, language: resolveAiLanguage(language) });
+  sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Answer marked", data: result });
+});
+
 const runAudit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.user?._id);
   const now = Date.now();
@@ -146,4 +182,4 @@ const generateTests = catchAsync(async (req: AuthenticatedRequest, res: Response
   sendResponse(res, { success: true, statusCode: httpStatus.OK, message: "Test cases generated", data: result });
 });
 
-export const aiController = { getHint, explainFailure, runAudit, runRefactor, verifyRefactor, generateTests };
+export const aiController = { getHint, explainFailure, askFollowUps, markFollowUp, runAudit, runRefactor, verifyRefactor, generateTests };
