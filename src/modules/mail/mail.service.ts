@@ -12,7 +12,7 @@
 // the outbox row instead.
 
 import { EmailOutboxModel } from "../../models/EmailOutbox.model.js";
-import { mailIsConfigured, sendThroughResend, PermanentMailError, type OutgoingMail } from "../../integrations/resend/resend.service.js";
+import { mailIsConfigured, sendMail, PermanentMailError, type OutgoingMail } from "../../integrations/mail/mailProvider.service.js";
 import type { BuiltMail } from "./mail.templates.js";
 
 const MAX_ATTEMPTS = 5;
@@ -53,7 +53,7 @@ const queue = async (to: string, mail: BuiltMail, sendAfter = new Date()) => {
 const sendNow = async (to: string, mail: BuiltMail) => {
   const outgoing = toOutgoing(to, mail);
   try {
-    const providerId = await sendThroughResend(outgoing);
+    const providerId = await sendMail(outgoing);
     // Kept as a record of what went out, and swept by the collection's TTL
     // after a month.
     await EmailOutboxModel.create({ ...outgoing, status: "sent", attempts: 1, sentAt: new Date(), providerId }).catch(() => undefined);
@@ -105,7 +105,7 @@ const flush = async (limit = 10) => {
     if (!claimed) break;
 
     try {
-      const providerId = await sendThroughResend({ to: claimed.to, subject: claimed.subject, html: claimed.html, text: claimed.text });
+      const providerId = await sendMail({ to: claimed.to, subject: claimed.subject, html: claimed.html, text: claimed.text });
       await EmailOutboxModel.updateOne({ _id: claimed._id }, { $set: { status: "sent", sentAt: new Date(), providerId }, $unset: { lastError: "" } });
       result.sent += 1;
     } catch (error) {

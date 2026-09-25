@@ -56,6 +56,9 @@ const envSchema = z.object({
   // is still testable locally and nothing crashes in a deployment that has
   // not been given an account yet.
   RESEND_API_KEY: optionalString,
+  // Brevo verifies a single sender address rather than a whole domain, so
+  // it can write to anyone without one. Preferred when both are set.
+  BREVO_API_KEY: optionalString,
   // Must be an address at a domain verified in Resend. Their sandbox sender
   // works without a domain but only delivers to the account owner.
   MAIL_FROM: optionalString,
@@ -101,7 +104,8 @@ export const config = {
   cloudinaryApiSecret: env.CLOUDINARY_API_SECRET,
   executionVisualizerEnabled: env.FEATURE_EXECUTION_VISUALIZER === "true",
   resendApiKey: env.RESEND_API_KEY,
-  mailFrom: env.MAIL_FROM ?? "Kaimana <onboarding@resend.dev>",
+  brevoApiKey: env.BREVO_API_KEY,
+  mailFrom: env.MAIL_FROM ?? "Kaimana <onboarding@resend.dev>", // override in every deployment
   mailReplyTo: env.MAIL_REPLY_TO,
   mailCronSecret: env.MAIL_CRON_SECRET,
   publicApiUrl: env.PUBLIC_API_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined),

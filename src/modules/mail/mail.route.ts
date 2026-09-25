@@ -18,6 +18,7 @@ import { EmailOutboxModel } from "../../models/EmailOutbox.model.js";
 import { UserModel } from "../../models/User.model.js";
 import { mailService } from "./mail.service.js";
 import { mailJobs } from "./mail.jobs.js";
+import { activeProvider } from "../../integrations/mail/mailProvider.service.js";
 
 const router = express.Router();
 
@@ -94,16 +95,17 @@ const unsubscribe = catchAsync(async (req, res) => {
 });
 
 const status = catchAsync(async (_req, res) => {
-  const [queued, failed, sent] = await Promise.all([
+  const [queued, failed, sent, lastFailure] = await Promise.all([
     EmailOutboxModel.countDocuments({ status: { $in: ["queued", "sending"] } }),
     EmailOutboxModel.countDocuments({ status: "failed" }),
     EmailOutboxModel.countDocuments({ status: "sent" }),
+    EmailOutboxModel.findOne({ lastError: { $exists: true } }).sort({ updatedAt: -1 }).select("to subject lastError updatedAt").lean(),
   ]);
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Mail queue status.",
-    data: { configured: mailService.isConfigured(), queued, failed, sentLast30Days: sent },
+    data: { configured: mailService.isConfigured(), provider: activeProvider(), queued, failed, sentLast30Days: sent, lastFailure },
   });
 });
 

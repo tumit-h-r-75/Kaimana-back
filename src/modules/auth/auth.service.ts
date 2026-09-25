@@ -197,7 +197,7 @@ const registerWithPassword = async ({ name, email, password, avatarBuffer }: { n
     void mailService.deliver(user.email, mailTemplates.welcome({ name: user.name }));
     // The confirmation goes out with the welcome; neither may hold up the
     // response that hands back the new session.
-    void sendEmailVerification(user._id);
+    void sendEmailVerification(user._id).catch(() => undefined);
     return { user: toSafeUser(user), ...issueTokens(user), isNewUser: true };
 };
 const loginWithPassword = async ({ email, password }: { email?: unknown; password?: unknown }) => {
@@ -397,12 +397,15 @@ const MAX_VERIFY_SENDS_PER_HOUR = 3;
  * bad minute — because this is called from registration, where the account
  * has already been created and the response is about the account.
  */
-const sendEmailVerification = async (userId: unknown) => {
+const sendEmailVerification = async (userId: unknown): Promise<{ sent: boolean; reason?: "verified" | "recent" | "failed" }> => {
     const user = await UserModel.findById(String(userId ?? ""));
-    if (!user?.email || user.emailVerifiedAt) return false;
+    if (!user?.email) return { sent: false, reason: "failed" };
+    if (user.emailVerifiedAt) return { sent: false, reason: "verified" };
 
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    if ((await EmailVerificationModel.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } })) >= MAX_VERIFY_SENDS_PER_HOUR) return false;
+    if ((await EmailVerificationModel.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } })) >= MAX_VERIFY_SENDS_PER_HOUR) {
+        return { sent: false, reason: "recent" };
+    }
 
     const token = randomBytes(32).toString("base64url");
     await EmailVerificationModel.create({
@@ -412,7 +415,8 @@ const sendEmailVerification = async (userId: unknown) => {
         expiresAt: new Date(Date.now() + EMAIL_VERIFY_MINUTES * 60 * 1000),
     });
     const url = `${config.frontendUrls[0] ?? ""}/verify-email?token=${token}`;
-    return mailService.deliver(user.email, mailTemplates.verifyEmail({ name: user.name, url, minutes: EMAIL_VERIFY_MINUTES }), { urgent: true });
+    const sent = await mailService.deliver(user.email, mailTemplates.verifyEmail({ name: user.name, url, minutes: EMAIL_VERIFY_MINUTES }), { urgent: true });
+    return sent ? { sent: true } : { sent: false, reason: "failed" };
 };
 
 /** Spends a confirmation link. */
