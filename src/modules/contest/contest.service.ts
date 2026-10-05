@@ -30,13 +30,13 @@ const findContestByIdentifier = async (identifier: string) => {
 };
 
 const listContests = async ({ page = 1, limit = 20 }: { page?: number; limit?: number }) => {
-  const safeLimit = Math.min(Math.max(limit, 1), 100);
-  const safePage = Math.max(page, 1);
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 20;
+  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
 
   const [items, total] = (await Promise.all([
     ContestModel.find({ isPublished: true })
       .select("slug title description startTime endTime problems")
-      .sort({ startTime: -1 })
+      .sort({ startTime: -1, _id: -1 })
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)
       .lean(),

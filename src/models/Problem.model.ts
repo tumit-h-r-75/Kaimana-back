@@ -81,6 +81,11 @@ const problemSchema = new Schema<IProblem>(
   { timestamps: true },
 );
 
+// Published catalogue pagination, with and without a difficulty/topic filter.
+problemSchema.index({ isPublished: 1, createdAt: -1, _id: -1 });
+problemSchema.index({ isPublished: 1, difficulty: 1, createdAt: -1, _id: -1 });
+problemSchema.index({ isPublished: 1, tags: 1, createdAt: -1, _id: -1 });
+
 problemSchema.set("toJSON", {
   virtuals: true,
   // `ret` is typed loosely here (matching Contest.model.ts /

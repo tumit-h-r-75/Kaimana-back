@@ -20,6 +20,7 @@ import {
   type ProposalLanguage,
 } from "../../models/ProblemProposal.model.js";
 import { ProblemModel } from "../../models/Problem.model.js";
+import { catalogueCache, problemTopicsCache } from "../../utils/readCache.js";
 import { TestCaseModel } from "../../models/TestCase.model.js";
 import { UserModel, type IUser } from "../../models/User.model.js";
 import { PROPOSAL_COST_GEMS, PROPOSAL_REJECT_REFUND_GEMS } from "../../utils/gems.js";
@@ -733,6 +734,8 @@ const reviewProposal = async (proposalId: string, reviewerId: string, payload: u
     await session.endSession();
   }
 
+  catalogueCache.clear();
+  problemTopicsCache.clear();
   const accepted = (await ProblemProposalModel.findById(proposal._id).lean()) as unknown as LeanProposal;
   await notificationService.notifyUser(accepted.userId, {
     email: true,

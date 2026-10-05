@@ -7,6 +7,7 @@ import { TestCaseModel } from "../../models/TestCase.model.js";
 import { HintUnlockModel } from "../../models/HintUnlock.model.js";
 import { AppError } from "../../utils/errors.js";
 import { notificationService } from "../notification/notification.service.js";
+import { catalogueCache, problemTopicsCache } from "../../utils/readCache.js";
 
 // mongoose.models.Problem || model<IProblem>(...) (see Problem.model.ts) widens
 // to a loosely-typed Model union, which makes .findOne().lean() resolve to an
@@ -72,18 +73,23 @@ const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, us
   if (tags) filter.tags = { $in: tags.split(",").map((tag) => tag.trim()).filter(Boolean) };
   if (search) filter.title = { $regex: toSearchRegex(search), $options: "i" };
 
-  const safeLimit = Math.min(Math.max(limit, 1), 100);
-  const safePage = Math.max(page, 1);
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 20;
+  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
 
-  const [items, total] = await Promise.all([
-    ProblemModel.find(filter)
-      .select("slug title difficulty tags basePoints statement")
-      .sort({ createdAt: -1 })
-      .skip((safePage - 1) * safeLimit)
-      .limit(safeLimit)
-      .lean(),
-    ProblemModel.countDocuments(filter),
-  ]);
+  // Cache only public records/statistics. Solved state stays per-user below.
+  const { items, total, stats } = await catalogueCache.read(JSON.stringify([filter, safePage, safeLimit]), 30_000, async () => {
+    const [items, total] = await Promise.all([
+      ProblemModel.find(filter)
+        .select("slug title difficulty tags basePoints statement")
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((safePage - 1) * safeLimit)
+        .limit(safeLimit)
+        .lean(),
+      ProblemModel.countDocuments(filter),
+    ]);
+    const stats = await submissionStats(items.map((item) => item._id as Types.ObjectId));
+    return { items, total, stats };
+  });
 
   let solvedProblemIds = new Set<string>();
   if (userId && items.length) {
@@ -96,8 +102,6 @@ const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, us
       .lean();
     solvedProblemIds = new Set(solved.map(String));
   }
-
-  const stats = await submissionStats(items.map((item) => item._id as Types.ObjectId));
 
   return {
     items: items.map((item) => {
@@ -122,7 +126,7 @@ const listProblems = async ({ difficulty, tags, search, page = 1, limit = 20, us
 };
 
 /** Published problems counted by topic and by difficulty, for the library's filters. */
-const getTopics = async () => {
+const getTopics = () => problemTopicsCache.read("topics", 300_000, async () => {
   const [byTag, byDifficulty, total] = await Promise.all([
     ProblemModel.aggregate<{ _id: string; count: number }>([
       { $match: { isPublished: true } },
@@ -142,7 +146,7 @@ const getTopics = async () => {
     byDifficulty: { EASY: difficultyCount.EASY ?? 0, MEDIUM: difficultyCount.MEDIUM ?? 0, HARD: difficultyCount.HARD ?? 0 },
     topics: byTag.map((row) => ({ tag: row._id, count: row.count })),
   };
-};
+});
 
 const getProblemBySlug = async (slug: string, userId?: string) => {
   const problem = (await ProblemModel.findOne({ slug: slug.toLowerCase(), isPublished: true }).lean()) as unknown as LeanProblem | null;
@@ -285,6 +289,8 @@ const createProblem = async (payload: ICreateProblemInput) => {
   const existing = await ProblemModel.findOne({ slug: payload.slug.toLowerCase() });
   if (existing) throw new AppError("A problem with this slug already exists.", 409);
   const created = await ProblemModel.create({ ...payload, slug: payload.slug.toLowerCase() });
+  catalogueCache.clear();
+  problemTopicsCache.clear();
   if (created.isPublished) await announceProblem(created);
   return created;
 };
@@ -303,6 +309,8 @@ const updateProblem = async (
   const before = (await ProblemModel.findById(problemId).select("isPublished").lean()) as unknown as { isPublished?: boolean } | null;
   const problem = await ProblemModel.findByIdAndUpdate(problemId, update, { new: true });
   if (!problem) throw new AppError("Problem not found.", 404);
+  catalogueCache.clear();
+  problemTopicsCache.clear();
   if (problem.isPublished && before && !before.isPublished) await announceProblem(problem);
   return problem;
 };
@@ -404,6 +412,8 @@ const deleteProblem = async (problemId: string) => {
   if (!Types.ObjectId.isValid(problemId)) throw new AppError("Invalid problem id.", 400);
   const problem = await ProblemModel.findByIdAndDelete(problemId);
   if (!problem) throw new AppError("Problem not found.", 404);
+  catalogueCache.clear();
+  problemTopicsCache.clear();
   await TestCaseModel.deleteMany({ problemId });
   return problem;
 };
@@ -466,7 +476,7 @@ const getRecommendations = async (userId: string) => {
   ])) as { _id: Types.ObjectId; solved: number; attempts: number; lastAttemptAt: Date }[];
 
   const solvedIds = new Set(perProblem.filter((p) => p.solved).map((p) => String(p._id)));
-  const problems = (await ProblemModel.find({ isPublished: true }).lean()) as unknown as LeanProblem[];
+  const problems = (await ProblemModel.find({ isPublished: true }).select("slug title difficulty tags basePoints").lean()) as unknown as LeanProblem[];
   const byId = new Map(problems.map((p) => [String(p._id), p]));
 
   // ---- resume: started, not finished, most recently touched.

@@ -7,6 +7,7 @@ import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/response.js";
 import { AppError } from "../../utils/errors.js";
 import { computeScore } from "../../utils/scoring.js";
+import { catalogueCache } from "../../utils/readCache.js";
 import { gemsForDifficulty } from "../../utils/gems.js";
 import { SubmissionModel } from "../../models/Submission.model.js";
 import { ProblemModel } from "../../models/Problem.model.js";
@@ -184,6 +185,8 @@ const submit = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
     failedTest: result.failedTest,
     submittedAt,
   });
+
+  catalogueCache.clear();
 
   // Gems: a fixed, difficulty-scaled reward paid exactly once per problem,
   // on the user's first ACCEPTED (see gems.service.ts). A failed payout must

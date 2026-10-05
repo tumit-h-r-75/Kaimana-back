@@ -33,6 +33,7 @@ npm run dev        # tsx watch, http://localhost:5000
 | `npm run build` | Compile to `dist/` |
 | `npm start` | Run the compiled server |
 | `npm run typecheck` | Type-check everything, scripts included |
+| `npm test` | Build and run cache/pagination/account-isolation regression tests without database queries |
 | `npm run seed` | Load the starter problem set and test cases |
 
 Other scripts, run with `npx tsx src/scripts/<name>.ts`:
@@ -63,6 +64,10 @@ Validated at start-up in `src/config/env.ts`. **Never commit `.env.local`.**
 | `FEATURE_EXECUTION_VISUALIZER` | no | `true` enables the traced-run endpoint |
 
 ## API
+
+Public catalogue queries cache one filtered page and its submission statistics for 30 seconds, coalescing concurrent reads. Topic counts cache for 5 minutes. Both caches are bounded and live in each server instance; they are not a shared Redis cache. Problem writes invalidate both caches, and new submissions invalidate catalogue statistics. Solved badges are queried separately for each caller and never stored in the public cache. Recommendations select only problem metadata, excluding statements and solutions.
+
+Compound MongoDB indexes cover published catalogue sorting/filtering, account submission history and solved badges. Pagination validates positive integers and sorts ties by `_id`. Mongoose creates the new indexes when models initialize unless the deployment disables `autoIndex`; in that case use the deployment's index-management process before expecting index-backed query improvements.
 
 Everything is under `/api`. Responses share one envelope: `{ success, statusCode, message, data }`.
 
